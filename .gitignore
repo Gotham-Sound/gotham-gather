@@ -1,0 +1,19 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# local env / secrets (never commit the rclone token or device creds)
+.env
+*.local
+rclone.conf
+
+# os
+.DS_Store
+._*
+
+# data / scratch
+/data/
+*.log

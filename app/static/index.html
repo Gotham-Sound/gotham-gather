@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gotham Gather</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181b22; --panel2:#1f232c; --line:#2a2f3a;
+          --fg:#e6e9ef; --muted:#9aa3b2; --accent:#4f9cff; --ok:#39d98a; --warn:#f5b84f; --bad:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  header { padding:16px 22px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:17px; margin:0; letter-spacing:.3px; }
+  header .sub { color:var(--muted); font-size:12px; }
+  .wrap { max-width:980px; margin:0 auto; padding:20px 16px 60px; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .devices { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:12px; margin:14px 0; }
+  .dev { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .dev .top { display:flex; align-items:center; justify-content:space-between; }
+  .dev .name { font-weight:600; }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:7px; }
+  .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.bad{background:var(--bad)}
+  .dev .detail { color:var(--muted); font-size:12px; margin-top:6px; min-height:16px; }
+  .dev .items { margin-top:8px; font-size:12px; color:var(--muted); }
+  .dev .items div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .controls { margin:18px 0; }
+  label.lbl { display:block; color:var(--muted); font-size:12px; margin-bottom:5px; }
+  input[type=text]{ background:var(--panel2); border:1px solid var(--line); color:var(--fg);
+      border-radius:8px; padding:9px 11px; width:260px; font:inherit; }
+  .srcs { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+  .srcs label { background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+      padding:7px 12px; cursor:pointer; user-select:none; }
+  .srcs label.on { border-color:var(--accent); background:#1b2735; }
+  .srcs input{ display:none; }
+  button { background:var(--accent); color:#071018; border:0; border-radius:8px; font:inherit;
+      font-weight:600; padding:10px 18px; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); font-weight:500; }
+  button:disabled{ opacity:.5; cursor:default; }
+  .log { background:#0b0d11; border:1px solid var(--line); border-radius:10px; padding:12px 14px;
+      font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap;
+      max-height:360px; overflow:auto; margin-top:14px; }
+  .log .ok{color:var(--ok)} .log .warn{color:var(--warn)} .log .bad{color:var(--bad)} .log .hd{color:var(--accent)}
+  .muted{color:var(--muted)} .pill{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Gotham Gather</h1>
+  <span class="sub">end-of-shoot media ingest · <span id="gen" class="muted"></span></span>
+  <span style="flex:1"></span>
+  <button class="ghost" id="refresh">↻ Rescan devices</button>
+</header>
+
+<div class="wrap">
+  <div class="devices" id="devices"></div>
+
+  <div class="card controls">
+    <label class="lbl">Shoot folder &nbsp;<span class="muted">(rubric: YYYY-MM-CODE, e.g. 2026-09-MWU)</span></label>
+    <input type="text" id="shoot" placeholder="2026-09-MWU" autocomplete="off">
+    <div class="srcs" id="srcs"></div>
+    <button id="run">Gather selected</button>
+    <span id="hint" class="muted" style="margin-left:10px"></span>
+  </div>
+
+  <div id="logwrap" style="display:none">
+    <div class="muted" style="margin-top:10px">Live output <span id="jobpill" class="pill"></span></div>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+const SOURCES = [
+  ["cards","Camera cards"],["pix","PIX"],["atem","ATEM"],
+  ["zcam","Z CAM"],["audio","Audio"],["sweep","Sweep"]
+];
+const $ = s => document.querySelector(s);
+const sel = new Set();
+
+function srcChips(){
+  const box = $("#srcs"); box.innerHTML="";
+  for(const [k,label] of SOURCES){
+    const el = document.createElement("label");
+    el.className = sel.has(k)?"on":""; el.textContent = label;
+    el.onclick = ()=>{ sel.has(k)?sel.delete(k):sel.add(k); srcChips(); };
+    box.appendChild(el);
+  }
+}
+
+function dotClass(d){ if(!d.reachable) return "bad"; return d.ready?"ok":"warn"; }
+
+async function loadStatus(){
+  $("#devices").innerHTML = '<div class="muted">scanning…</div>';
+  const r = await fetch("/api/status"); const data = await r.json();
+  $("#gen").textContent = "scanned "+(data.generated||"");
+  const box = $("#devices"); box.innerHTML="";
+  for(const d of data.devices){
+    const el = document.createElement("div"); el.className="dev";
+    let items="";
+    if(d.items && d.items.length){
+      items = '<div class="items">'+d.items.slice(0,5).map(it=>{
+        const extra = it.size?(" · "+it.size):(it.label?(" · "+it.label):(it.mode?(" · "+it.mode):""));
+        const today = it.today?' <span style="color:var(--ok)">(today)</span>':'';
+        return "<div>• "+(it.name||it.dev||"?")+extra+today+"</div>";
+      }).join("")+"</div>";
+    }
+    el.innerHTML = `<div class="top"><span class="name"><span class="dot ${dotClass(d)}"></span>${d.name}</span></div>
+      <div class="detail">${d.detail||""}</div>${items}`;
+    box.appendChild(el);
+  }
+  // suggest sources that are ready
+  if(sel.size===0){
+    for(const d of data.devices){ if(d.ready && d.key!=="zcam") sel.add(d.key); }
+    srcChips();
+  }
+  // prefill shoot from newest existing or blank
+  const hint = $("#hint");
+  hint.textContent = data.shoots && data.shoots.length ? ("recent: "+data.shoots.slice(0,3).map(s=>s.name).join(", ")) : "";
+}
+
+function paintLine(line){
+  let cls="";
+  if(line.includes("✓")) cls="ok"; else if(line.includes("⚠")) cls="warn";
+  else if(line.includes("✗")) cls="bad"; else if(line.startsWith("[")) cls="hd";
+  const span=document.createElement("span"); span.className=cls; span.textContent=line+"\n";
+  const log=$("#log"); log.appendChild(span); log.scrollTop=log.scrollHeight;
+}
+
+async function run(){
+  const shoot=$("#shoot").value.trim();
+  if(!shoot){ $("#hint").textContent="enter a shoot name"; return; }
+  if(sel.size===0){ $("#hint").textContent="pick at least one source"; return; }
+  $("#run").disabled=true; $("#logwrap").style.display="block"; $("#log").innerHTML="";
+  const r=await fetch("/api/gather",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({shoot,sources:[...sel]})});
+  if(!r.ok){ paintLine("✗ "+(await r.text())); $("#run").disabled=false; return; }
+  const {job_id}=await r.json();
+  $("#jobpill").textContent="job "+job_id+" · "+shoot;
+  const es=new EventSource(`/api/jobs/${job_id}/events`);
+  es.onmessage=e=>paintLine(e.data);
+  es.addEventListener("done",e=>{ paintLine("— finished ("+e.data+") —"); es.close();
+    $("#run").disabled=false; loadStatus(); });
+  es.onerror=()=>{ es.close(); $("#run").disabled=false; };
+}
+
+$("#refresh").onclick=loadStatus;
+$("#run").onclick=run;
+srcChips(); loadStatus();
+</script>
+</body>
+</html>
