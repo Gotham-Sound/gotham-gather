@@ -22,7 +22,7 @@
 set -uo pipefail
 
 # ───────────────────────── CONFIG (site-specific) ─────────────────────────
-SHARE="/mnt/user/isos"                       # where shoot folders live
+SHARE="${ISOS_SHARE:-/mnt/user/isos}"        # where shoot folders live (container sets ISOS_SHARE=/data/isos)
 TMP="${TMPDIR:-/tmp}/gather-shoot.$$"        # scratch mounts
 TODAY="$(date +%Y-%m-%d)"                    # used to pick "today's" media
 
@@ -114,6 +114,9 @@ do_cards_dir(){
       cam=$(grep -oiE 'CAM[ _]*[0-9]+' <<<"$base" | grep -oE '[0-9]+' | head -1)
       dest="$SHOOT/CAM-${cam:-$label}"
       exp=$(stat -c %s "$f")
+      if [ -f "$dest/$base" ] && [ "$(stat -c %s "$dest/$base" 2>/dev/null)" = "$exp" ]; then
+        ok "already have $base — skipping"; continue
+      fi
       say "  card '$label': $base ($(human "$exp")) -> $(basename "$dest")/"
       pull_file "$f" "$dest" "$exp"
     done

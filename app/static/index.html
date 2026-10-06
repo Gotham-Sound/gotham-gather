@@ -55,8 +55,16 @@
 <div class="wrap">
   <div class="devices" id="devices"></div>
 
+  <div class="card" id="activecard" style="margin-bottom:14px; border-color:#2e3a4a">
+    <label class="lbl">⚡ Active shoot &nbsp;<span class="muted">— cards you plug in auto-gather into this folder, no clicks</span></label>
+    <input type="text" id="activeshoot" placeholder="2026-09-MWU" autocomplete="off">
+    <button id="setactive">Set active</button>
+    <label style="margin-left:14px; cursor:pointer; user-select:none"><input type="checkbox" id="autoingest" checked style="vertical-align:-1px"> auto-ingest cards on insert</label>
+    <div id="activestatus" class="muted" style="margin-top:9px"></div>
+  </div>
+
   <div class="card controls">
-    <label class="lbl">Shoot folder &nbsp;<span class="muted">(rubric: YYYY-MM-CODE, e.g. 2026-09-MWU)</span></label>
+    <label class="lbl">Manual gather — shoot folder &nbsp;<span class="muted">(rubric: YYYY-MM-CODE, e.g. 2026-09-MWU)</span></label>
     <input type="text" id="shoot" placeholder="2026-09-MWU" autocomplete="off">
     <div class="srcs" id="srcs"></div>
     <button id="run">Gather selected</button>
@@ -147,6 +155,41 @@ async function run(){
   es.onerror=()=>{ es.close(); $("#run").disabled=false; };
 }
 
+// ---- Active shoot / zero-click auto-ingest ----
+let streamingAuto = null;    // auto job id currently being streamed into the log
+async function loadActive(){
+  try{
+    const r = await fetch("/api/active-shoot"); if(!r.ok) return; const s = await r.json();
+    if(document.activeElement !== $("#activeshoot")) $("#activeshoot").value = s.active_shoot || "";
+    $("#autoingest").checked = !!s.auto_ingest;
+    const st = $("#activestatus");
+    if(s.active_shoot && s.auto_ingest){
+      st.innerHTML = `🟢 Auto-ingest <b>ON</b> → plug a card and it gathers into <b>${s.active_shoot}</b>`;
+    } else if(s.active_shoot){
+      st.innerHTML = `active shoot: <b>${s.active_shoot}</b> · auto-ingest off`;
+    } else { st.textContent = "set an active shoot to enable plug-and-go card ingest"; }
+    // if the watcher kicked off an auto gather, surface it live
+    if(s.auto_job && !s.auto_job_done && streamingAuto !== s.auto_job){
+      streamingAuto = s.auto_job;
+      $("#logwrap").style.display="block"; $("#log").innerHTML="";
+      $("#jobpill").textContent = "auto-ingest · "+s.active_shoot;
+      paintLine("⚡ card detected — auto-gathering into "+s.active_shoot);
+      const es=new EventSource(`/api/jobs/${s.auto_job}/events`);
+      es.onmessage=e=>paintLine(e.data);
+      es.addEventListener("done",e=>{ paintLine("— auto-ingest finished ("+e.data+") —"); es.close(); streamingAuto=null; loadStatus(); });
+      es.onerror=()=>{ es.close(); streamingAuto=null; };
+    }
+  }catch(e){}
+}
+async function setActive(){
+  const shoot=$("#activeshoot").value.trim();
+  await fetch("/api/active-shoot",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({shoot, auto_ingest:$("#autoingest").checked})});
+  loadActive();
+}
+$("#setactive").onclick=setActive;
+$("#autoingest").onchange=setActive;
+
 // Live card detection — poll the fast cards-only endpoint so a card lights up the
 // dashboard the moment it's inserted (and auto-mounted), no manual rescan needed.
 let lastCardsDetail = null;
@@ -156,17 +199,15 @@ async function pollCards(){
     const d = await r.json();
     const el = document.getElementById("dev-"+d.key);
     if(el) el.innerHTML = devInner(d);
-    if(d.detail !== lastCardsDetail && d.ready){      // newly appeared → suggest the source
-      sel.add("cards"); srcChips();
-    }
+    if(d.detail !== lastCardsDetail && d.ready){ sel.add("cards"); srcChips(); }
     lastCardsDetail = d.detail;
   }catch(e){}
 }
-setInterval(pollCards, 8000);
+setInterval(()=>{ pollCards(); loadActive(); }, 8000);
 
 $("#refresh").onclick=loadStatus;
 $("#run").onclick=run;
-srcChips(); loadStatus();
+srcChips(); loadStatus(); loadActive();
 </script>
 </body>
 </html>

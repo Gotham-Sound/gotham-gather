@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 # runtime tools the gather engine shells out to
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl smbclient cifs-utils samba-common-bin rclone ca-certificates \
+      curl rsync smbclient cifs-utils samba-common-bin rclone ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

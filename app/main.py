@@ -5,7 +5,7 @@ their live output to the browser. Phase 2 replaces the shell-out with native
 device modules + a job queue + SQLite history.
 """
 from __future__ import annotations
-import asyncio, os, re, uuid, time, shlex
+import asyncio, os, re, uuid, time, json
 from pathlib import Path
 from dataclasses import asdict
 from fastapi import FastAPI, HTTPException
@@ -24,6 +24,55 @@ app = FastAPI(title="Gotham Gather")
 
 # in-memory job registry (MVP). {job_id: {proc, lines[], done, shoot, sources}}
 JOBS: dict[str, dict] = {}
+
+# Persisted "active shoot" state (survives restarts via the isos volume) + auto-ingest.
+STATE_FILE = os.path.join(SHARE, ".gather-state.json")
+
+def _load_state() -> dict:
+    try:
+        with open(STATE_FILE) as f:
+            s = json.load(f)
+    except Exception:  # noqa: BLE001
+        s = {}
+    s.setdefault("active_shoot", "")
+    s.setdefault("auto_ingest", True)
+    return s
+
+def _save_state() -> None:
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(STATE, f)
+    except Exception:  # noqa: BLE001
+        pass
+
+STATE = _load_state()
+# watcher bookkeeping
+AUTO = {"seen": set(), "job": None, "shoot": None}
+
+
+async def start_gather(shoot: str, sources: list[str]) -> str:
+    """Launch gather.sh for shoot+sources as a tracked job; return its id."""
+    job_id = uuid.uuid4().hex[:8]
+    proc = await asyncio.create_subprocess_exec(
+        "bash", GATHER_SH, shoot, *sources,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    job = {"proc": proc, "lines": [], "done": False, "rc": None,
+           "shoot": shoot, "sources": sources, "started": time.time()}
+    JOBS[job_id] = job
+
+    async def pump():
+        assert proc.stdout
+        async for raw in proc.stdout:
+            line = re.sub(r"\x1b\[[0-9;]*m", "", raw.decode(errors="replace").rstrip("\n"))
+            if "\r" in line:
+                line = line.split("\r")[-1]
+            job["lines"].append(line)
+            del job["lines"][:-500]
+        job["rc"] = await proc.wait()
+        job["done"] = True
+
+    asyncio.create_task(pump())
+    return job_id
 
 
 @app.get("/api/status")
@@ -51,30 +100,54 @@ async def gather(payload: dict):
     sources = [s for s in sources if s in VALID_SOURCES]
     if not sources:
         raise HTTPException(400, "pick at least one valid source")
-
-    job_id = uuid.uuid4().hex[:8]
-    cmd = ["bash", GATHER_SH, shoot, *sources]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-    job = {"proc": proc, "lines": [], "done": False, "rc": None,
-           "shoot": shoot, "sources": sources, "started": time.time()}
-    JOBS[job_id] = job
-
-    async def pump():
-        assert proc.stdout
-        async for raw in proc.stdout:
-            line = raw.decode(errors="replace").rstrip("\n")
-            # strip ANSI color and collapse rsync's carriage-return progress spam
-            line = re.sub(r"\x1b\[[0-9;]*m", "", line)
-            if "\r" in line:
-                line = line.split("\r")[-1]
-            job["lines"].append(line)
-            del job["lines"][:-500]  # keep last 500 lines
-        job["rc"] = await proc.wait()
-        job["done"] = True
-
-    asyncio.create_task(pump())
+    job_id = await start_gather(shoot, sources)
     return {"job_id": job_id, "shoot": shoot, "sources": sources}
+
+
+@app.get("/api/active-shoot")
+async def get_active_shoot():
+    job = JOBS.get(AUTO["job"] or "", {})
+    return {**STATE, "auto_job": AUTO["job"],
+            "auto_job_done": job.get("done", True) if AUTO["job"] else True}
+
+
+@app.post("/api/active-shoot")
+async def set_active_shoot(payload: dict):
+    shoot = (payload or {}).get("shoot", "").strip()
+    if shoot and not SHOOT_RE.match(shoot):
+        raise HTTPException(400, "invalid shoot name (use the YYYY-MM-CODE rubric)")
+    STATE["active_shoot"] = shoot
+    if "auto_ingest" in (payload or {}):
+        STATE["auto_ingest"] = bool(payload["auto_ingest"])
+    # changing the active shoot re-arms auto-ingest for the cards currently in
+    AUTO["seen"] = set()
+    _save_state()
+    return STATE
+
+
+async def card_watcher():
+    """Zero-click ingest: when a card appears and an active shoot is set, auto-run the
+    cards gather into it. do_cards_dir skips cards already fully present, so re-triggers
+    are cheap and only new cards transfer."""
+    while True:
+        try:
+            if STATE.get("active_shoot") and STATE.get("auto_ingest", True):
+                d = await asyncio.to_thread(detect.detect_cards)
+                labels = {it.get("label") for it in (d.items or []) if it.get("label")}
+                running = bool(AUTO["job"]) and not JOBS.get(AUTO["job"], {}).get("done", True)
+                fresh = labels - AUTO["seen"]
+                if labels and fresh and not running:
+                    AUTO["job"] = await start_gather(STATE["active_shoot"], ["cards"])
+                    AUTO["shoot"] = STATE["active_shoot"]
+                    AUTO["seen"] |= labels
+        except Exception:  # noqa: BLE001
+            pass
+        await asyncio.sleep(8)
+
+
+@app.on_event("startup")
+async def _startup():
+    asyncio.create_task(card_watcher())
 
 
 @app.get("/api/jobs")
