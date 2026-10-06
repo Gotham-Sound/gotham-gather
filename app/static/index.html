@@ -83,6 +83,13 @@
     <div class="srcs" id="srcs"></div>
     <button id="run">Gather selected</button>
     <span id="hint" class="muted" style="margin-left:10px"></span>
+
+    <div style="margin-top:14px; border-top:1px solid var(--line); padding-top:12px">
+      <label class="lbl">🔗 Audio by Drive link <span class="muted">— when field audio is shared as a direct link instead of dropped in the folder</span></label>
+      <input type="text" id="audiolink" placeholder="https://drive.google.com/file/d/…/view   (or just the file ID)" autocomplete="off" style="width:min(440px,100%)">
+      <button id="pullaudio" class="ghost">Pull audio</button>
+      <span id="audiohint" class="muted" style="margin-left:8px"></span>
+    </div>
   </div>
 
   <div id="logwrap" style="display:none">
@@ -183,21 +190,39 @@ function paintLine(line){
   const log=$("#log"); log.appendChild(span); log.scrollTop=log.scrollHeight;
 }
 
+function streamJob(job_id, label, onEnd){
+  $("#logwrap").style.display="block"; $("#jobpill").textContent=label;
+  const es=new EventSource(`/api/jobs/${job_id}/events`);
+  es.onmessage=e=>paintLine(e.data);
+  es.addEventListener("done",e=>{ paintLine("— finished ("+e.data+") —"); es.close();
+    loadStatus(); pollGlance(); if(onEnd) onEnd(); });
+  es.onerror=()=>{ es.close(); if(onEnd) onEnd(); };
+}
 async function run(){
   const shoot=$("#shoot").value.trim();
   if(!shoot){ $("#hint").textContent="enter a shoot name"; return; }
   if(sel.size===0){ $("#hint").textContent="pick at least one source"; return; }
-  $("#run").disabled=true; $("#logwrap").style.display="block"; $("#log").innerHTML="";
+  $("#run").disabled=true; $("#log").innerHTML="";
   const r=await fetch("/api/gather",{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({shoot,sources:[...sel]})});
-  if(!r.ok){ paintLine("✗ "+(await r.text())); $("#run").disabled=false; return; }
+  if(!r.ok){ $("#logwrap").style.display="block"; paintLine("✗ "+(await r.text())); $("#run").disabled=false; return; }
   const {job_id}=await r.json();
-  $("#jobpill").textContent="job "+job_id+" · "+shoot;
-  const es=new EventSource(`/api/jobs/${job_id}/events`);
-  es.onmessage=e=>paintLine(e.data);
-  es.addEventListener("done",e=>{ paintLine("— finished ("+e.data+") —"); es.close();
-    $("#run").disabled=false; loadStatus(); });
-  es.onerror=()=>{ es.close(); $("#run").disabled=false; };
+  streamJob(job_id, "job "+job_id+" · "+shoot, ()=>{ $("#run").disabled=false; });
+}
+async function pullAudio(){
+  const shoot=$("#shoot").value.trim() || activeShootVal;
+  const link=$("#audiolink").value.trim();
+  if(!shoot){ $("#audiohint").textContent="set a shoot name (above, or the Active shoot)"; return; }
+  if(!link){ $("#audiohint").textContent="paste a Drive link or file ID"; return; }
+  $("#pullaudio").disabled=true; $("#audiohint").textContent="pulling…";
+  const r=await fetch("/api/audio-link",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({shoot,link})});
+  $("#pullaudio").disabled=false;
+  if(!r.ok){ $("#audiohint").textContent="✗ "+(await r.text()); return; }
+  const {job_id,file_id}=await r.json();
+  $("#audiohint").textContent="pulling "+file_id.slice(0,10)+"… → "+shoot+"/AUDIO";
+  $("#log").innerHTML="";
+  streamJob(job_id, "audio link · "+shoot);
 }
 
 // ---- Active shoot / zero-click auto-ingest ----
@@ -253,6 +278,7 @@ setInterval(()=>{ pollCards(); loadActive(); pollGlance(); }, 5000);
 
 $("#refresh").onclick=loadStatus;
 $("#run").onclick=run;
+$("#pullaudio").onclick=pullAudio;
 srcChips(); loadStatus(); loadActive(); pollGlance();
 </script>
 </body>

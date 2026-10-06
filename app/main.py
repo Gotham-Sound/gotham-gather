@@ -17,6 +17,7 @@ from . import detect
 APP_DIR = Path(__file__).parent
 GATHER_SH = os.environ.get("GATHER_SH", str(APP_DIR.parent / "bin" / "gather.sh"))
 SHARE = detect.SHARE
+RCLONE_REMOTE = detect.RCLONE_REMOTE
 VALID_SOURCES = {"cards", "pix", "atem", "zcam", "audio", "sweep", "pixeft", "pixrec"}
 SHOOT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -101,12 +102,14 @@ def _disk_present(shoot: str, src: str) -> bool:
     return False
 
 
-async def start_gather(shoot: str, sources: list[str]) -> str:
-    """Launch gather.sh for shoot+sources as a tracked job; return its id."""
+async def _spawn_job(shoot: str, sources: list[str], cmd: list[str],
+                     trust_rc: bool = False) -> str:
+    """Run `cmd` as a tracked job, streaming output and tracking per-source status.
+    trust_rc=True marks the source verified on a clean exit (for a plain rclone pull
+    that doesn't print the engine's own ✓ verified line)."""
     job_id = uuid.uuid4().hex[:8]
     proc = await asyncio.create_subprocess_exec(
-        "bash", GATHER_SH, shoot, *sources,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
     job = {"proc": proc, "lines": [], "done": False, "rc": None,
            "shoot": shoot, "sources": sources, "started": time.time()}
     JOBS[job_id] = job
@@ -158,12 +161,19 @@ async def start_gather(shoot: str, sources: list[str]) -> str:
         for s in sources:   # finalize anything still 'copying' we never saw a ✓ for
             if s in STATUS_SOURCES and shoot_status(shoot).get(s, {}).get("state") == "copying":
                 present = _disk_present(shoot, s)
-                _set_src(shoot, s, state=("present" if present else "pending"),
-                         detail=("on disk" if present else "nothing gathered"))
+                if trust_rc and job["rc"] == 0 and present:
+                    _set_src(shoot, s, state="verified", pct=100, detail="done")
+                else:
+                    _set_src(shoot, s, state=("present" if present else "pending"),
+                             detail=("on disk" if present else "nothing gathered"))
         _persist_status(shoot)
 
     asyncio.create_task(pump())
     return job_id
+
+
+async def start_gather(shoot: str, sources: list[str]) -> str:
+    return await _spawn_job(shoot, sources, ["bash", GATHER_SH, shoot, *sources])
 
 
 @app.get("/api/status")
@@ -210,6 +220,30 @@ async def gather(payload: dict):
         raise HTTPException(400, "pick at least one valid source")
     job_id = await start_gather(shoot, sources)
     return {"job_id": job_id, "shoot": shoot, "sources": sources}
+
+
+_DRIVE_ID = re.compile(r"[A-Za-z0-9_-]{25,}")
+
+@app.post("/api/audio-link")
+async def audio_link(payload: dict):
+    """Pull one Google Drive file (by share link or ID) straight into <shoot>/AUDIO/.
+    For when field audio is shared as a direct link instead of dropped in the folder."""
+    shoot = (payload or {}).get("shoot", "").strip()
+    link = (payload or {}).get("link", "").strip()
+    if not SHOOT_RE.match(shoot):
+        raise HTTPException(400, "invalid shoot name")
+    m = _DRIVE_ID.search(link)
+    if not m:
+        raise HTTPException(400, "couldn't find a Drive file ID in that link")
+    fid = m.group(0)
+    dest = os.path.join(SHARE, shoot, "AUDIO") + "/"
+    os.makedirs(dest, exist_ok=True)
+    job_id = await _spawn_job(
+        shoot, ["audio"],
+        ["rclone", "backend", "copyid", f"{RCLONE_REMOTE}:", fid, dest,
+         "-P", "--stats", "2s", "--stats-one-line"],
+        trust_rc=True)
+    return {"job_id": job_id, "file_id": fid}
 
 
 @app.get("/api/active-shoot")

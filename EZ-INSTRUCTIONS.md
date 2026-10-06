@@ -12,7 +12,9 @@ Quick reference for running and maintaining the app. Full deploy details are in
 ![Gotham Gather dashboard](docs/img/dashboard.png)
 
 *The dashboard: device status cards up top, the ⚡ Active-shoot auto-ingest banner, the
-📊 At-a-glance strip (pending → copying → ✓ verified per source), and the live gather log.*
+📊 At-a-glance strip (pending → copying → ✓ verified per source), the manual gather, and
+the 🔗 Audio-by-Drive-link field. (Z CAM shows red here only because that remote camera
+is powered off; green = reachable.)*
 
 ---
 
@@ -51,11 +53,12 @@ git push    # origin = https://github.com/Gotham-Sound/gotham-gather.git
 - **Normal:** TK uploads WAVs to the shared Drive folder
   (`1t8Bm5MCO_I64Z3ebDugy_rciigizeB81`). Run the **Audio** source — it grabs only the
   recent ones (last 72h), not old shoots'.
-- **One-off link:** if TK shares a *direct link* instead, pull it by file ID:
-  ```
-  rclone backend copyid gdrive: <FILE_ID> "/mnt/user/isos/<shoot>/AUDIO/"
-  ```
-  (`<FILE_ID>` is the long string in the Drive URL `/file/d/<FILE_ID>/view`.)
+- **Paste a Drive link (in the app):** if TK shares a *direct link* instead of using the
+  folder, paste it into the **🔗 Audio by Drive link** field (under Manual gather), make
+  sure the shoot name is set, and click **Pull audio**. It extracts the file ID and pulls
+  the file straight into `<shoot>/AUDIO/` with live status.
+  *CLI equivalent:* `rclone backend copyid gdrive: <FILE_ID> "/mnt/user/isos/<shoot>/AUDIO/"`
+  (`<FILE_ID>` is the long string in a Drive URL `/file/d/<FILE_ID>/view`).
 
 ---
 
