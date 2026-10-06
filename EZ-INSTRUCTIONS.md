@@ -9,6 +9,11 @@ Quick reference for running and maintaining the app. Full deploy details are in
 - **Container:** `gotham-gather` (Unraid Docker tab) · image `gotham-gather:latest`
 - **Media lands in:** `/mnt/user/isos/<shoot>/` (e.g. `2026-09-MWU`)
 
+![Gotham Gather dashboard](docs/img/dashboard.png)
+
+*The dashboard: device status cards up top, the ⚡ Active-shoot auto-ingest banner, the
+📊 At-a-glance strip (pending → copying → ✓ verified per source), and the live gather log.*
+
 ---
 
 ## Everyday use (team)
