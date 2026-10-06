@@ -104,7 +104,9 @@ do_cards_dir(){
   local found=0 d
   for d in "$CARDS_DIR"/*/; do
     [ -d "$d" ] || continue
-    mapfile -t braws < <(find "$d" -maxdepth 3 -iname '*.braw' 2>/dev/null)
+    # timeout-guard the scan: a failing/stale USB mount (dead device, I/O errors) under
+    # the same dir must not hang or stall card detection — it just gets skipped.
+    mapfile -t braws < <(timeout 15 find "$d" -maxdepth 3 -iname '*.braw' 2>/dev/null)
     [ ${#braws[@]} -eq 0 ] && continue
     found=1
     local label; label=$(basename "$d")

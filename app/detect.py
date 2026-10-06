@@ -119,11 +119,20 @@ def detect_cards() -> Device:
     import glob
     if CARDS_DIR and os.path.isdir(CARDS_DIR):
         cards = []
-        for name in sorted(os.listdir(CARDS_DIR)):
+        try:
+            names = sorted(os.listdir(CARDS_DIR))
+        except OSError:
+            names = []
+        for name in names:
             d = os.path.join(CARDS_DIR, name)
-            if not os.path.isdir(d):
-                continue
-            if glob.glob(os.path.join(d, "*.braw")) or glob.glob(os.path.join(d, "*", "*.braw")):
+            try:
+                if not os.path.isdir(d):
+                    continue
+                has = bool(glob.glob(os.path.join(d, "*.braw")) or
+                           glob.glob(os.path.join(d, "*", "*.braw")))
+            except OSError:
+                continue   # a failing/stale USB mount (I/O error) — skip, never break detection
+            if has:
                 cards.append({"label": name, "dev": name})
         return Device("cards", "Camera cards (USB)", True,
                       f"{len(cards)} card(s) with footage" if cards else "no cards mounted",

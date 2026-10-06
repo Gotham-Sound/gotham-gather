@@ -117,33 +117,49 @@ async def start_gather(shoot: str, sources: list[str]) -> str:
 
     async def pump():
         assert proc.stdout
-        cur = sources[0] if (len(sources) == 1 and sources[0] in STATUS_SOURCES) else None
-        async for raw in proc.stdout:
-            line = re.sub(r"\x1b\[[0-9;]*m", "", raw.decode(errors="replace").rstrip("\n"))
-            if "\r" in line:
-                line = line.split("\r")[-1]
-            job["lines"].append(line); del job["lines"][:-500]
+        state = {"cur": sources[0] if (len(sources) == 1 and sources[0] in STATUS_SOURCES) else None}
+
+        def handle(raw_line: str):
+            line = re.sub(r"\x1b\[[0-9;]*m", "", raw_line).rstrip()
+            if not line:
+                return
             hm = _HDR.search(line)
             if hm:
-                cur = hm.group(1).lower()
+                state["cur"] = hm.group(1).lower()
+            cur = state["cur"]
+            pm = _PCT.search(line)
+            is_progress = bool(pm and "/s" in line)   # rsync/rclone progress line
+            if not is_progress:                        # keep progress spam out of the log
+                job["lines"].append(line); del job["lines"][:-500]
             if cur in STATUS_SOURCES:
                 if any(m in line for m in _VERIFIED):
-                    _set_src(shoot, cur, state="verified", pct=100, detail=line.strip()[:90])
-                    _persist_status(shoot)
+                    _set_src(shoot, cur, state="verified", pct=100, detail=line.strip()[:90]); _persist_status(shoot)
                 elif "✗" in line:
-                    _set_src(shoot, cur, state="error", detail=line.strip()[:90])
-                    _persist_status(shoot)
-                else:
-                    pm = _PCT.search(line)
-                    if pm and "/s" in line:
-                        _set_src(shoot, cur, state="copying", pct=int(pm.group(1)), detail="copying…")
+                    _set_src(shoot, cur, state="error", detail=line.strip()[:90]); _persist_status(shoot)
+                elif is_progress:
+                    _set_src(shoot, cur, state="copying", pct=int(pm.group(1)), detail="copying…")
+
+        # Read raw chunks and split on BOTH \r and \n: rsync --info=progress2 updates
+        # the percentage with carriage returns, which a line-by-line (\n) reader only
+        # sees when the file finishes — making the bar look frozen mid-copy.
+        buf = b""
+        while True:
+            chunk = await proc.stdout.read(65536)
+            if not chunk:
+                break
+            buf += chunk
+            segs = re.split(rb"[\r\n]", buf)
+            buf = segs.pop()
+            for seg in segs:
+                handle(seg.decode(errors="replace"))
+        if buf:
+            handle(buf.decode(errors="replace"))
         job["rc"] = await proc.wait(); job["done"] = True
         for s in sources:   # finalize anything still 'copying' we never saw a ✓ for
             if s in STATUS_SOURCES and shoot_status(shoot).get(s, {}).get("state") == "copying":
-                if _disk_present(shoot, s):
-                    _set_src(shoot, s, state="present", detail="on disk")
-                else:
-                    _set_src(shoot, s, state="pending", detail="nothing gathered")
+                present = _disk_present(shoot, s)
+                _set_src(shoot, s, state=("present" if present else "pending"),
+                         detail=("on disk" if present else "nothing gathered"))
         _persist_status(shoot)
 
     asyncio.create_task(pump())
