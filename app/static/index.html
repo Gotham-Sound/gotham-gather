@@ -42,6 +42,15 @@
       max-height:360px; overflow:auto; margin-top:14px; }
   .log .ok{color:var(--ok)} .log .warn{color:var(--warn)} .log .bad{color:var(--bad)} .log .hd{color:var(--accent)}
   .muted{color:var(--muted)} .pill{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+  .glance{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+  .chip{border:1px solid var(--line);border-radius:9px;padding:9px 12px;min-width:132px;background:var(--panel2)}
+  .chip .lab{font-weight:600;font-size:12.5px}
+  .chip .st{font-size:11px;color:var(--muted);margin-top:3px}
+  .chip.verified{border-color:var(--ok)} .chip.verified .st{color:var(--ok)}
+  .chip.present{border-color:#356049} .chip.copying{border-color:var(--accent)} .chip.copying .st{color:var(--accent)}
+  .chip.error{border-color:var(--bad)} .chip.error .st{color:var(--bad)}
+  .bar{height:4px;background:#2a2f3a;border-radius:3px;margin-top:7px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--accent);transition:width .5s}
 </style>
 </head>
 <body>
@@ -61,6 +70,11 @@
     <button id="setactive">Set active</button>
     <label style="margin-left:14px; cursor:pointer; user-select:none"><input type="checkbox" id="autoingest" checked style="vertical-align:-1px"> auto-ingest cards on insert</label>
     <div id="activestatus" class="muted" style="margin-top:9px"></div>
+  </div>
+
+  <div class="card" id="glancecard" style="margin-bottom:14px; display:none">
+    <label class="lbl">📊 At a glance — <span id="glanceshoot" style="color:var(--fg)"></span></label>
+    <div id="glance" class="glance"></div>
   </div>
 
   <div class="card controls">
@@ -84,6 +98,37 @@ const SOURCES = [
 ];
 const $ = s => document.querySelector(s);
 const sel = new Set();
+
+// ---- At-a-glance per-shoot ingest status ----
+const SRC_LABELS = {cards:"Cameras", pix:"PIX", atem:"ATEM", zcam:"Z CAM", audio:"Audio"};
+let activeShootVal = "";
+function glanceTarget(){ return activeShootVal || $("#shoot").value.trim(); }
+function stText(st){
+  if(st.state==="verified") return "✓ verified";
+  if(st.state==="present")  return "on disk";
+  if(st.state==="copying")  return "copying "+(st.pct||0)+"%";
+  if(st.state==="error")    return "✗ error";
+  return "— pending";
+}
+async function pollGlance(){
+  const shoot = glanceTarget(); const card = $("#glancecard");
+  if(!shoot){ card.style.display="none"; return; }
+  try{
+    const r = await fetch("/api/shoot-status?shoot="+encodeURIComponent(shoot));
+    if(!r.ok){ card.style.display="none"; return; }
+    const d = await r.json();
+    $("#glanceshoot").textContent = d.shoot;
+    const box = $("#glance"); box.innerHTML="";
+    for(const k of ["cards","pix","atem","zcam","audio"]){
+      const st = d.sources[k] || {state:"pending"};
+      const bar = st.state==="copying" ? `<div class="bar"><i style="width:${st.pct||0}%"></i></div>` : "";
+      const el = document.createElement("div"); el.className = "chip "+st.state;
+      el.innerHTML = `<div class="lab">${SRC_LABELS[k]}</div><div class="st">${stText(st)}</div>${bar}`;
+      box.appendChild(el);
+    }
+    card.style.display="block";
+  }catch(e){}
+}
 
 function srcChips(){
   const box = $("#srcs"); box.innerHTML="";
@@ -160,6 +205,7 @@ let streamingAuto = null;    // auto job id currently being streamed into the lo
 async function loadActive(){
   try{
     const r = await fetch("/api/active-shoot"); if(!r.ok) return; const s = await r.json();
+    activeShootVal = s.active_shoot || "";
     if(document.activeElement !== $("#activeshoot")) $("#activeshoot").value = s.active_shoot || "";
     $("#autoingest").checked = !!s.auto_ingest;
     const st = $("#activestatus");
@@ -203,11 +249,11 @@ async function pollCards(){
     lastCardsDetail = d.detail;
   }catch(e){}
 }
-setInterval(()=>{ pollCards(); loadActive(); }, 8000);
+setInterval(()=>{ pollCards(); loadActive(); pollGlance(); }, 5000);
 
 $("#refresh").onclick=loadStatus;
 $("#run").onclick=run;
-srcChips(); loadStatus(); loadActive();
+srcChips(); loadStatus(); loadActive(); pollGlance();
 </script>
 </body>
 </html>

@@ -49,6 +49,57 @@ STATE = _load_state()
 # watcher bookkeeping
 AUTO = {"seen": set(), "job": None, "shoot": None}
 
+# ---- per-shoot ingest status (the at-a-glance panel) ----
+# States: pending (not gathered) · copying (job running, with pct) · verified (engine's
+# ✓ byte/hash check passed) · present (on disk, verification marker not captured) · error.
+STATUS_SOURCES = ["cards", "pix", "atem", "zcam", "audio"]
+SHOOT_STATUS: dict[str, dict] = {}
+_HDR = re.compile(r"\b(CARDS|PIX|ATEM|ZCAM|AUDIO)\s+[—-]")       # gather.sh section headers
+_PCT = re.compile(r"(\d{1,3})%")
+_VERIFIED = ("✓ verified", "0 differences found", "done — safe to remove", "already have")
+
+def _status_path(shoot): return os.path.join(SHARE, shoot, ".gather-status.json")
+
+def shoot_status(shoot: str) -> dict:
+    if shoot not in SHOOT_STATUS:
+        try:
+            with open(_status_path(shoot)) as f:
+                SHOOT_STATUS[shoot] = json.load(f)
+        except Exception:  # noqa: BLE001
+            SHOOT_STATUS[shoot] = {}
+    return SHOOT_STATUS[shoot]
+
+def _persist_status(shoot: str):
+    try:
+        os.makedirs(os.path.join(SHARE, shoot), exist_ok=True)
+        with open(_status_path(shoot), "w") as f:
+            json.dump(SHOOT_STATUS.get(shoot, {}), f)
+    except Exception:  # noqa: BLE001
+        pass
+
+def _set_src(shoot, src, **kw):
+    st = shoot_status(shoot).setdefault(src, {})
+    st.update(kw); st["updated"] = time.strftime("%H:%M:%S")
+
+def _disk_present(shoot: str, src: str) -> bool:
+    base = os.path.join(SHARE, shoot)
+    def nonempty(sub):
+        p = os.path.join(base, sub)
+        try:
+            return os.path.isdir(p) and any(not f.startswith(".") for f in os.listdir(p))
+        except OSError:
+            return False
+    if src == "pix":   return nonempty("PIX")
+    if src == "atem":  return nonempty("ATEM")
+    if src == "audio": return nonempty("AUDIO")
+    if src == "zcam":  return nonempty("CAM-TK")
+    if src == "cards":
+        try:
+            return any(re.match(r"CAM-\d", d) and nonempty(d) for d in os.listdir(base))
+        except OSError:
+            return False
+    return False
+
 
 async def start_gather(shoot: str, sources: list[str]) -> str:
     """Launch gather.sh for shoot+sources as a tracked job; return its id."""
@@ -59,17 +110,41 @@ async def start_gather(shoot: str, sources: list[str]) -> str:
     job = {"proc": proc, "lines": [], "done": False, "rc": None,
            "shoot": shoot, "sources": sources, "started": time.time()}
     JOBS[job_id] = job
+    for s in sources:
+        if s in STATUS_SOURCES:
+            _set_src(shoot, s, state="copying", pct=0, detail="starting…")
+    _persist_status(shoot)
 
     async def pump():
         assert proc.stdout
+        cur = sources[0] if (len(sources) == 1 and sources[0] in STATUS_SOURCES) else None
         async for raw in proc.stdout:
             line = re.sub(r"\x1b\[[0-9;]*m", "", raw.decode(errors="replace").rstrip("\n"))
             if "\r" in line:
                 line = line.split("\r")[-1]
-            job["lines"].append(line)
-            del job["lines"][:-500]
-        job["rc"] = await proc.wait()
-        job["done"] = True
+            job["lines"].append(line); del job["lines"][:-500]
+            hm = _HDR.search(line)
+            if hm:
+                cur = hm.group(1).lower()
+            if cur in STATUS_SOURCES:
+                if any(m in line for m in _VERIFIED):
+                    _set_src(shoot, cur, state="verified", pct=100, detail=line.strip()[:90])
+                    _persist_status(shoot)
+                elif "✗" in line:
+                    _set_src(shoot, cur, state="error", detail=line.strip()[:90])
+                    _persist_status(shoot)
+                else:
+                    pm = _PCT.search(line)
+                    if pm and "/s" in line:
+                        _set_src(shoot, cur, state="copying", pct=int(pm.group(1)), detail="copying…")
+        job["rc"] = await proc.wait(); job["done"] = True
+        for s in sources:   # finalize anything still 'copying' we never saw a ✓ for
+            if s in STATUS_SOURCES and shoot_status(shoot).get(s, {}).get("state") == "copying":
+                if _disk_present(shoot, s):
+                    _set_src(shoot, s, state="present", detail="on disk")
+                else:
+                    _set_src(shoot, s, state="pending", detail="nothing gathered")
+        _persist_status(shoot)
 
     asyncio.create_task(pump())
     return job_id
@@ -81,6 +156,23 @@ async def status():
     data = await asyncio.to_thread(detect.detect_all)
     data["shoots"] = detect.list_shoots()
     return JSONResponse(data)
+
+
+@app.get("/api/shoot-status")
+async def shoot_status_api(shoot: str):
+    if not SHOOT_RE.match(shoot or ""):
+        raise HTTPException(400, "invalid shoot name")
+    stored = shoot_status(shoot)
+    out = {}
+    for s in STATUS_SOURCES:
+        st = stored.get(s)
+        if st and st.get("state") in ("copying", "verified", "error"):
+            out[s] = st
+        elif await asyncio.to_thread(_disk_present, shoot, s):
+            out[s] = {"state": "present", "detail": "on disk", "pct": 100}
+        else:
+            out[s] = {"state": "pending", "detail": "not gathered", "pct": 0}
+    return {"shoot": shoot, "sources": out}
 
 
 @app.get("/api/cards")
