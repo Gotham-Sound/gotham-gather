@@ -145,23 +145,40 @@ def detect_cards() -> Device:
 def detect_audio() -> Device:
     if not shutil.which("rclone"):
         return Device("audio", "Field audio (Drive)", False, "rclone not installed")
-    rc, out = _run(["rclone", "lsl", f"{RCLONE_REMOTE}:",
-                    "--drive-root-folder-id", AUDIO_FOLDER_ID], timeout=20)
-    wavs = []
-    for line in out.splitlines():
-        m = re.match(r"\s*(\d+)\s+([\d-]+\s[\d:.]+)\s+(.+\.wav)", line, re.I)
-        if m:
-            wavs.append({"name": m.group(3).strip(), "size": _human(int(m.group(1))),
-                         "modified": m.group(2)[:10]})
-    # A read-only rclone config dir makes token refresh fail to SAVE (non-zero exit) even
-    # though the listing still comes through — treat that as reachable. Real auth failures
-    # return no data. (Fix: mount the rclone config read-write so tokens persist.)
-    ro_save_warning = "read-only file system" in out
-    if not wavs and rc != 0 and not ro_save_warning:
-        return Device("audio", "Field audio (Drive)", False, "rclone auth/remote error")
+    def _parse(out):
+        w = []
+        for line in out.splitlines():
+            m = re.match(r"\s*(\d+)\s+([\d-]+\s[\d:.]+)\s+(.+\.wav)", line, re.I)
+            if m:
+                w.append({"name": m.group(3).strip(), "size": _human(int(m.group(1))),
+                          "modified": m.group(2)[:10]})
+        return w
+
+    def _ls():
+        return _run(["rclone", "lsl", f"{RCLONE_REMOTE}:", "--drive-root-folder-id",
+                     AUDIO_FOLDER_ID, "--low-level-retries", "2"], timeout=25)
+
+    rc, out = _ls()
+    wavs = _parse(out)
+    # A read-only rclone config makes the token refresh fail to SAVE (non-zero exit) even
+    # though the listing still comes through — treat that as reachable.
+    ro_save = "read-only file system" in out
+    if not wavs and rc != 0 and not ro_save:
+        # The first call right after a container start can fail while rclone does its
+        # initial token refresh. Retry once before calling it an error.
+        rc, out = _ls()
+        wavs = _parse(out)
+        ro_save = ro_save or "read-only file system" in out
+        if not wavs and rc != 0 and not ro_save:
+            low = out.lower()
+            if any(k in low for k in ("invalid_grant", "unauthor", "401", "token has been expired",
+                                      "couldn't fetch token", "oauth")):
+                return Device("audio", "Field audio (Drive)", False,
+                              "rclone auth expired — re-run: rclone authorize \"drive\"")
+            return Device("audio", "Field audio (Drive)", False, "Drive unreachable — will retry")
     detail = f"{len(wavs)} WAV(s) in Drive folder"
-    if ro_save_warning:
-        detail += " · ⚠ rclone config is read-only (mount it RW so tokens refresh)"
+    if ro_save:
+        detail += " · ⚠ rclone config read-only (mount RW so tokens refresh)"
     return Device("audio", "Field audio (Drive)", True, detail, bool(wavs), wavs)
 
 def detect_all() -> dict:
