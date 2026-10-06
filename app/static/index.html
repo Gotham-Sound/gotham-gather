@@ -89,23 +89,27 @@ function srcChips(){
 
 function dotClass(d){ if(!d.reachable) return "bad"; return d.ready?"ok":"warn"; }
 
+function devInner(d){
+  let items="";
+  if(d.items && d.items.length){
+    items = '<div class="items">'+d.items.slice(0,5).map(it=>{
+      const extra = it.size?(" · "+it.size):(it.label?(" · "+it.label):(it.mode?(" · "+it.mode):""));
+      const today = it.today?' <span style="color:var(--ok)">(today)</span>':'';
+      return "<div>• "+(it.name||it.dev||"?")+extra+today+"</div>";
+    }).join("")+"</div>";
+  }
+  return `<div class="top"><span class="name"><span class="dot ${dotClass(d)}"></span>${d.name}</span></div>
+    <div class="detail">${d.detail||""}</div>${items}`;
+}
+
 async function loadStatus(){
   $("#devices").innerHTML = '<div class="muted">scanning…</div>';
   const r = await fetch("/api/status"); const data = await r.json();
   $("#gen").textContent = "scanned "+(data.generated||"");
   const box = $("#devices"); box.innerHTML="";
   for(const d of data.devices){
-    const el = document.createElement("div"); el.className="dev";
-    let items="";
-    if(d.items && d.items.length){
-      items = '<div class="items">'+d.items.slice(0,5).map(it=>{
-        const extra = it.size?(" · "+it.size):(it.label?(" · "+it.label):(it.mode?(" · "+it.mode):""));
-        const today = it.today?' <span style="color:var(--ok)">(today)</span>':'';
-        return "<div>• "+(it.name||it.dev||"?")+extra+today+"</div>";
-      }).join("")+"</div>";
-    }
-    el.innerHTML = `<div class="top"><span class="name"><span class="dot ${dotClass(d)}"></span>${d.name}</span></div>
-      <div class="detail">${d.detail||""}</div>${items}`;
+    const el = document.createElement("div"); el.className="dev"; el.id="dev-"+d.key;
+    el.innerHTML = devInner(d);
     box.appendChild(el);
   }
   // suggest sources that are ready
@@ -142,6 +146,23 @@ async function run(){
     $("#run").disabled=false; loadStatus(); });
   es.onerror=()=>{ es.close(); $("#run").disabled=false; };
 }
+
+// Live card detection — poll the fast cards-only endpoint so a card lights up the
+// dashboard the moment it's inserted (and auto-mounted), no manual rescan needed.
+let lastCardsDetail = null;
+async function pollCards(){
+  try{
+    const r = await fetch("/api/cards"); if(!r.ok) return;
+    const d = await r.json();
+    const el = document.getElementById("dev-"+d.key);
+    if(el) el.innerHTML = devInner(d);
+    if(d.detail !== lastCardsDetail && d.ready){      // newly appeared → suggest the source
+      sel.add("cards"); srcChips();
+    }
+    lastCardsDetail = d.detail;
+  }catch(e){}
+}
+setInterval(pollCards, 8000);
 
 $("#refresh").onclick=loadStatus;
 $("#run").onclick=run;

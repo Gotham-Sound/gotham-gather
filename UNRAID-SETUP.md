@@ -66,6 +66,32 @@ http://192.168.100.50:8787
 
 ---
 
+## Hands-off camera cards (auto-mount + live detection)
+So you never touch the shell for cards, two pieces are needed:
+
+**1. Auto-mount the card on the host** — Unraid **Unassigned Devices**:
+- Main tab → **Unassigned Devices** section. When a card is plugged in it appears there.
+- Toggle **Automount ON** for it (UD remembers the device). Now it mounts to
+  `/mnt/disks/<LABEL>` automatically on every insert.
+
+**2. Let the container see mounts that happen AFTER it started** — bind the cards path
+with **`rslave`** propagation (a plain `-v` bind is `rprivate` and won't see new mounts):
+- In the template, **remove** the `/data/cards → /mnt/disks` Path row, and instead add to
+  **Extra Parameters**:
+  ```
+  --mount type=bind,source=/mnt/disks,target=/data/cards,readonly,bind-propagation=rslave
+  ```
+  So the full Extra Parameters field reads:
+  ```
+  --cap-add SYS_ADMIN --security-opt apparmor=unconfined --mount type=bind,source=/mnt/disks,target=/data/cards,readonly,bind-propagation=rslave
+  ```
+- Apply (recreates the container).
+
+Then: plug a card into a **rear** USB port → it auto-mounts → the web dashboard's Cards
+tile goes green within ~8 seconds and pre-checks the Cards source → confirm the shoot name
+→ **Gather**. (Requires `/mnt/disks` to be a shared mount on the host, which it is by
+default on Unraid.)
+
 ## Why "Host" network (not Bridge)
 The app has to reach three *different* subnets — PIX `192.168.99.x`, ATEM `192.168.100.x`,
 Z CAM `192.168.102.x` — which are routed through the Unraid gateway. **Host** networking

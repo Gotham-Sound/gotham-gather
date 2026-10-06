@@ -7,6 +7,7 @@ device modules + a job queue + SQLite history.
 from __future__ import annotations
 import asyncio, os, re, uuid, time, shlex
 from pathlib import Path
+from dataclasses import asdict
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +32,14 @@ async def status():
     data = await asyncio.to_thread(detect.detect_all)
     data["shoots"] = detect.list_shoots()
     return JSONResponse(data)
+
+
+@app.get("/api/cards")
+async def cards():
+    # fast, local-only (no network) — safe to poll every few seconds so an inserted
+    # card lights up the dashboard on its own
+    d = await asyncio.to_thread(detect.detect_cards)
+    return asdict(d)
 
 
 @app.post("/api/gather")
