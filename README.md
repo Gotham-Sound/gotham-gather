@@ -3,22 +3,33 @@
 A web front-end for the end-of-shoot media gather — the same workflow as the
 `gather-shoot` skill, driveable from a browser on any machine on the LAN.
 
-**MVP status:** the web app wraps `bin/gather.sh` (a copy of the skill's engine).
-It detects devices, lets you pick a shoot name + sources, runs the gather, and
-streams live progress to the browser. Phase 2 replaces the shell-out with native
-device modules, a job queue, SQLite history, and checksums.
+The web app wraps `bin/gather.sh` (a copy of the `gather-shoot` skill's engine). It's an
+**explicit "see-and-confirm" tool**: it detects every card by its *real* project + CAM#
+(flagging any from a different shoot), you check what belongs to the shoot and confirm,
+and it streams live progress with a per-source at-a-glance status. See `EZ-INSTRUCTIONS.md`
+for the usage walkthrough and `UNRAID-SETUP.md` for deployment.
 
 ## Layout
 ```
 gather-app/
 ├── app/
-│   ├── main.py          FastAPI: /api/status, /api/gather, /api/jobs/*/events, /
-│   ├── detect.py        device probes (Z CAM, PIX, ATEM, USB cards, Drive)
-│   └── static/index.html  single-page UI (device cards, source picker, live log)
+│   ├── main.py          FastAPI endpoints (see below) + job runner with live progress
+│   ├── detect.py        device probes + enriched card identities (project/CAM#)
+│   └── static/index.html  single-page see-and-confirm UI
 ├── bin/gather.sh        the gather engine (synced from the skill)
-├── Dockerfile
+├── Dockerfile           python + rsync/smbclient/cifs/rclone, TZ=America/New_York
 └── requirements.txt
 ```
+
+### Key API endpoints
+- `GET  /api/detect-items` — every available item (cards by real identity + mismatch flag,
+  PIX, ATEM, audio); probes run concurrently.
+- `POST /api/gather-selected` — gather only the chosen items (`cards:[mountpaths]`, plus
+  `pix`/`atem`/`audio`) into a shoot.
+- `POST /api/add-upload` (multipart) · `POST /api/add-link` · `POST /api/add-path` —
+  add arbitrary files (browser upload / Drive link / server path) into `<shoot>/<subfolder>/`.
+- `GET  /api/shoot-status?shoot=…` — per-source ingest status (pending/copying/verified).
+- `GET  /api/jobs/{id}/events` — SSE live log for a running job. `GET /` serves the UI.
 
 ## Run locally (dev)
 ```
@@ -52,15 +63,16 @@ docker run -d --name gotham-gather \
   userspace client — `smbprotocol` — and drops this cap entirely.)
 
 ## USB camera cards (the host-mount + bind model)
-Per the chosen design, the container does **not** mount `/dev` itself. Instead:
+The container does **not** mount `/dev` itself (stays non-privileged). Instead:
 1. Unraid's **Unassigned Devices** auto-mounts an inserted card at `/mnt/disks/<LABEL>`.
-2. Bind that into the container: `-v /mnt/disks:/data/cards:ro`.
-3. **Phase-2 TODO:** point the `cards` source at `/data/cards/*` (read already-mounted
-   dirs) instead of detecting + mounting block devices. A UD *device script* hook can
-   POST to `/api/card-inserted` so the UI lights up the moment a card is plugged in.
+2. That's bound into the container as `/data/cards` with **`rslave`** propagation, so a
+   card mounted *after* the container started still appears inside it (see `UNRAID-SETUP.md`).
+3. `detect.card_items()` reads each mounted card dir, parses the `.braw` filename for its
+   project + CAM#, and `gather-selected` ingests only the cards you checked
+   (`card:<mountpath>` → `CAM-N/`), verified. Failing/stale mounts are timeout-guarded so
+   they can't stall the scan.
 
-Until that change lands, card ingest still works by running the gather **on the host**
-(`bash bin/gather.sh <shoot> cards`); the network sources all work in the container now.
+The same `bin/gather.sh` also runs standalone on the host (`bash bin/gather.sh <shoot> cards`).
 
 ## Unraid "Add Container" template (summary)
 | Field | Value |
