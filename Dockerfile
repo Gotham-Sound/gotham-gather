@@ -2,8 +2,12 @@ FROM python:3.12-slim
 
 # runtime tools the gather engine shells out to
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl rsync smbclient cifs-utils samba-common-bin rclone ca-certificates \
+      curl rsync smbclient cifs-utils samba-common-bin rclone ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+# Match the studio's local time so "today's shoot" detection works in the evening
+# (gear stamps local time; a UTC container rolls over to tomorrow after ~8pm EDT).
+ENV TZ=America/New_York
 
 WORKDIR /app
 COPY requirements.txt .

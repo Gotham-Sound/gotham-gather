@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio, os, re, uuid, time, json
 from pathlib import Path
 from dataclasses import asdict
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -54,6 +54,11 @@ AUTO = {"seen": set(), "job": None, "shoot": None}
 # States: pending (not gathered) · copying (job running, with pct) · verified (engine's
 # ✓ byte/hash check passed) · present (on disk, verification marker not captured) · error.
 STATUS_SOURCES = ["cards", "pix", "atem", "zcam", "audio"]
+
+def _statsrc(s: str):
+    if s.startswith("card:"):
+        return "cards"
+    return s if s in STATUS_SOURCES else None
 SHOOT_STATUS: dict[str, dict] = {}
 _HDR = re.compile(r"\b(CARDS|PIX|ATEM|ZCAM|AUDIO)\s+[—-]")       # gather.sh section headers
 _PCT = re.compile(r"(\d{1,3})%")
@@ -113,14 +118,14 @@ async def _spawn_job(shoot: str, sources: list[str], cmd: list[str],
     job = {"proc": proc, "lines": [], "done": False, "rc": None,
            "shoot": shoot, "sources": sources, "started": time.time()}
     JOBS[job_id] = job
-    for s in sources:
-        if s in STATUS_SOURCES:
-            _set_src(shoot, s, state="copying", pct=0, detail="starting…")
+    stat_sources = {x for x in (_statsrc(s) for s in sources) if x}
+    for s in stat_sources:
+        _set_src(shoot, s, state="copying", pct=0, detail="starting…")
     _persist_status(shoot)
 
     async def pump():
         assert proc.stdout
-        state = {"cur": sources[0] if (len(sources) == 1 and sources[0] in STATUS_SOURCES) else None}
+        state = {"cur": _statsrc(sources[0]) if len(sources) == 1 else None}
 
         def handle(raw_line: str):
             line = re.sub(r"\x1b\[[0-9;]*m", "", raw_line).rstrip()
@@ -158,8 +163,8 @@ async def _spawn_job(shoot: str, sources: list[str], cmd: list[str],
         if buf:
             handle(buf.decode(errors="replace"))
         job["rc"] = await proc.wait(); job["done"] = True
-        for s in sources:   # finalize anything still 'copying' we never saw a ✓ for
-            if s in STATUS_SOURCES and shoot_status(shoot).get(s, {}).get("state") == "copying":
+        for s in stat_sources:   # finalize anything still 'copying' we never saw a ✓ for
+            if shoot_status(shoot).get(s, {}).get("state") == "copying":
                 present = _disk_present(shoot, s)
                 if trust_rc and job["rc"] == 0 and present:
                     _set_src(shoot, s, state="verified", pct=100, detail="done")
@@ -246,6 +251,126 @@ async def audio_link(payload: dict):
     return {"job_id": job_id, "file_id": fid}
 
 
+# ───────── explicit "see & confirm" model ─────────
+SUBFOLDER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,40}$")
+
+@app.get("/api/detect-items")
+async def detect_items_api():
+    """Everything available to add, each by its real identity, with mismatch flags.
+    Probes run concurrently so a slow network source doesn't stall the whole scan."""
+    cards, atem, pix, audio = await asyncio.gather(
+        asyncio.to_thread(detect.card_items),
+        asyncio.to_thread(detect.atem_today),
+        asyncio.to_thread(detect.detect_pix),
+        asyncio.to_thread(detect.detect_audio),
+    )
+    # Reference = the newest ATEM project (that's today's shoot's identity); fall back to
+    # the project most cards agree on. Not gated on the "today" flag (TZ-robust).
+    ref = atem.get("project")
+    if not ref:
+        from collections import Counter
+        projs = [c["project"] for c in cards if c["project"]]
+        ref = Counter(projs).most_common(1)[0][0] if projs else None
+    for c in cards:
+        c["mismatch"] = bool(ref and c["project"] and c["project"] != ref)
+    return {"reference_project": ref, "cards": cards,
+            "pix": {"reachable": pix.reachable, "detail": pix.detail, "ready": pix.ready},
+            "atem": {"reachable": bool(atem["project"]), **atem},
+            "audio": {"reachable": audio.reachable, "detail": audio.detail,
+                      "items": audio.items or []}}
+
+
+@app.post("/api/gather-selected")
+async def gather_selected(payload: dict):
+    """Gather ONLY the explicitly chosen items into the shoot — specific cards (by mount),
+    plus optional pix/atem/audio. No silent all-or-nothing."""
+    shoot = (payload or {}).get("shoot", "").strip()
+    if not SHOOT_RE.match(shoot):
+        raise HTTPException(400, "invalid shoot name")
+    sources = []
+    base = os.path.realpath(detect.CARDS_DIR) if detect.CARDS_DIR else None
+    for mount in (payload or {}).get("cards", []):
+        mp = os.path.realpath(str(mount))
+        if base and (mp == base or mp.startswith(base + os.sep)) and os.path.isdir(mp):
+            sources.append("card:" + mp)
+    for s in ("pix", "atem", "audio", "zcam"):
+        if (payload or {}).get(s):
+            sources.append(s)
+    if not sources:
+        raise HTTPException(400, "nothing selected")
+    os.makedirs(os.path.join(SHARE, shoot), exist_ok=True)
+    job_id = await start_gather(shoot, sources)
+    return {"job_id": job_id, "shoot": shoot, "sources": sources}
+
+
+@app.post("/api/add-link")
+async def add_link(payload: dict):
+    """Pull any Drive file (by link or ID) into <shoot>/<subfolder>/ (default AUDIO)."""
+    shoot = (payload or {}).get("shoot", "").strip()
+    link = (payload or {}).get("link", "").strip()
+    sub = ((payload or {}).get("subfolder") or "AUDIO").strip()
+    if not SHOOT_RE.match(shoot):
+        raise HTTPException(400, "invalid shoot name")
+    if not SUBFOLDER_RE.match(sub):
+        raise HTTPException(400, "invalid subfolder name")
+    m = _DRIVE_ID.search(link)
+    if not m:
+        raise HTTPException(400, "couldn't find a Drive file ID in that link")
+    dest = os.path.join(SHARE, shoot, sub) + "/"
+    os.makedirs(dest, exist_ok=True)
+    src = ["audio"] if sub.upper() == "AUDIO" else []
+    job_id = await _spawn_job(
+        shoot, src,
+        ["rclone", "backend", "copyid", f"{RCLONE_REMOTE}:", m.group(0), dest,
+         "-P", "--stats", "2s", "--stats-one-line"],
+        trust_rc=True)
+    return {"job_id": job_id, "file_id": m.group(0), "subfolder": sub}
+
+
+@app.post("/api/add-path")
+async def add_path(payload: dict):
+    """Copy a file/dir already on the server (or a mount) into <shoot>/<subfolder>/."""
+    shoot = (payload or {}).get("shoot", "").strip()
+    srcp = os.path.realpath(str((payload or {}).get("src", "")).strip())
+    sub = ((payload or {}).get("subfolder") or "").strip()
+    if not SHOOT_RE.match(shoot):
+        raise HTTPException(400, "invalid shoot name")
+    if not SUBFOLDER_RE.match(sub):
+        raise HTTPException(400, "invalid subfolder name")
+    if not os.path.exists(srcp):
+        raise HTTPException(400, "source path not found (must be on the server or a mount)")
+    dest = os.path.join(SHARE, shoot, sub) + "/"
+    os.makedirs(dest, exist_ok=True)
+    job_id = await _spawn_job(shoot, [], [
+        "rsync", "-rt", "--inplace", "--partial", "--append-verify",
+        "--no-perms", "--no-owner", "--no-group",
+        "--exclude=._*", "--exclude=.DS_Store", "--info=progress2", srcp, dest])
+    return {"job_id": job_id, "subfolder": sub}
+
+
+@app.post("/api/add-upload")
+async def add_upload(shoot: str = Form(...), subfolder: str = Form(...),
+                     file: UploadFile = File(...)):
+    """Stream a file uploaded from the browser (e.g. iPhone clips on a laptop) into
+    <shoot>/<subfolder>/."""
+    if not SHOOT_RE.match(shoot):
+        raise HTTPException(400, "invalid shoot name")
+    if not SUBFOLDER_RE.match(subfolder):
+        raise HTTPException(400, "invalid subfolder name")
+    name = os.path.basename(file.filename or "upload.bin")
+    dest_dir = os.path.join(SHARE, shoot, subfolder)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = os.path.join(dest_dir, name)
+    size = 0
+    with open(dest, "wb") as out:
+        while True:
+            chunk = await file.read(1 << 20)
+            if not chunk:
+                break
+            out.write(chunk); size += len(chunk)
+    return {"ok": True, "file": name, "bytes": size, "subfolder": subfolder}
+
+
 @app.get("/api/active-shoot")
 async def get_active_shoot():
     job = JOBS.get(AUTO["job"] or "", {})
@@ -289,7 +414,11 @@ async def card_watcher():
 
 @app.on_event("startup")
 async def _startup():
-    asyncio.create_task(card_watcher())
+    # Explicit model: the card_watcher auto-ingest is intentionally NOT started — plugging
+    # a card no longer silently copies into whatever the active shoot was (that caused the
+    # stale-shoot misroute). Gathers are explicit via /api/gather-selected.
+    STATE["auto_ingest"] = False
+    _save_state()
 
 
 @app.get("/api/jobs")

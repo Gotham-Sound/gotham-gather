@@ -11,20 +11,27 @@ Quick reference for running and maintaining the app. Full deploy details are in
 
 ![Gotham Gather dashboard](docs/img/dashboard.png)
 
-*The dashboard: device status cards up top, the ⚡ Active-shoot auto-ingest banner, the
-📊 At-a-glance strip (pending → copying → ✓ verified per source), the manual gather, and
-the 🔗 Audio-by-Drive-link field. (Z CAM shows red here only because that remote camera
-is powered off; green = reachable.)*
+*See-and-confirm flow: (1) name the shoot, (2) check what belongs — every card shows its
+real project + CAM# with a "matches" / "⚠ different shoot" badge (mismatches start
+unchecked), (3) add other files (uploads, Drive links, server paths). Then Gather, with a
+live progress bar + an at-a-glance status per source.*
 
 ---
 
 ## Everyday use (team)
-1. Open the app. Set the **⚡ Active shoot** (rubric `YYYY-MM-CODE`, e.g. `2026-09-MWU`).
-2. Plug camera cards into a **REAR** USB port → they auto-ingest into `CAM-N/`,
-   with a live progress bar. The **📊 At a glance** strip shows each source:
-   pending → copying % → ✓ verified.
-3. PIX / ATEM / Z CAM: tick the source + **Gather** (or they're part of a full run).
-4. Field audio: see below.
+**It's explicit now — you see every card's real identity and confirm before anything copies.**
+1. **Name the shoot** (step 1).
+2. **Check what to gather** (step 2): each detected card shows its *actual* project + CAM#.
+   Anything matching today's shoot is pre-checked; anything from a **different shoot is
+   flagged ⚠ and left unchecked**. PIX / ATEM / Audio appear as their own checkboxes.
+   Review, then **Gather checked** → confirm → live progress + the at-a-glance strip.
+3. **Add other files** (step 3) for anything not on a card: **upload** from your computer
+   (iPhone clips), paste a **Drive link**, or point at a **server path** — each into a
+   subfolder you name (e.g. `CAM-iPhone`, `AUDIO`).
+
+> No more sticky "active shoot" auto-ingest — plugging a card no longer silently copies
+> into whatever shoot was last set. That mix-up is gone; everything is checked + confirmed.
+> Always use a **REAR** USB port for cards (front ports are flaky).
 
 ---
 
@@ -80,7 +87,8 @@ or mount it by hand: `mount -t exfat -o ro /dev/sdX2 /mnt/disks/<label>`.
 | **"no cards" but a card is plugged in** | Card isn't *mounted*. Enable UD Automount, or Mount it in Unassigned Devices. Cards show as exfat USB disks (`lsblk`). |
 | **Card copy hangs after one card** | A stale/failing `/mnt/disks` mount (dead USB device) stalled the scan. Hardened now (timeout-guarded). Clear dead mounts: `umount -l /mnt/disks/<name>`. |
 | **Audio: "rclone auth/remote error"** | Usually a cold-start blip right after Apply — hit **Rescan**. If persistent: the rclone config mount must be **Read/Write** (token refresh). Re-auth: `rclone authorize "drive" --drive-scope=drive.readonly`. |
-| **Nothing copies when a card is plugged in** | No **Active shoot** set, or auto-ingest unchecked. Set it at the top of the page. |
+| **A card is plugged in but not in the list** | It's not *mounted* (enable UD Automount, or Mount it in Unassigned Devices), or it's a stale/blank card. Then **Rescan**. |
+| **Copied the wrong shoot's footage** | Each card now shows its real project + CAM# with a ⚠ flag — only check cards that match this shoot. Eject old shoots' cards. |
 | **Front USB port** | Flaky — cards read as 0-byte / don't enumerate. Use a **REAR** port. |
 
 ---

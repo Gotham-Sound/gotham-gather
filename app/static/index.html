@@ -5,281 +5,247 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gotham Gather</title>
 <style>
-  :root { --bg:#0f1115; --panel:#181b22; --panel2:#1f232c; --line:#2a2f3a;
-          --fg:#e6e9ef; --muted:#9aa3b2; --accent:#4f9cff; --ok:#39d98a; --warn:#f5b84f; --bad:#ff6b6b; }
+  :root { --bg:#0f1115; --panel:#181b22; --panel2:#1f232c; --line:#2a2f3a; --fg:#e6e9ef;
+          --muted:#9aa3b2; --accent:#4f9cff; --ok:#39d98a; --warn:#f5b84f; --bad:#ff6b6b; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
   header { padding:16px 22px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; }
   header h1 { font-size:17px; margin:0; letter-spacing:.3px; }
-  header .sub { color:var(--muted); font-size:12px; }
-  .wrap { max-width:980px; margin:0 auto; padding:20px 16px 60px; }
-  .row { display:flex; gap:16px; flex-wrap:wrap; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
-  .devices { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:12px; margin:14px 0; }
-  .dev { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
-  .dev .top { display:flex; align-items:center; justify-content:space-between; }
-  .dev .name { font-weight:600; }
-  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:7px; }
-  .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.bad{background:var(--bad)}
-  .dev .detail { color:var(--muted); font-size:12px; margin-top:6px; min-height:16px; }
-  .dev .items { margin-top:8px; font-size:12px; color:var(--muted); }
-  .dev .items div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .controls { margin:18px 0; }
-  label.lbl { display:block; color:var(--muted); font-size:12px; margin-bottom:5px; }
-  input[type=text]{ background:var(--panel2); border:1px solid var(--line); color:var(--fg);
-      border-radius:8px; padding:9px 11px; width:260px; font:inherit; }
-  .srcs { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
-  .srcs label { background:var(--panel2); border:1px solid var(--line); border-radius:8px;
-      padding:7px 12px; cursor:pointer; user-select:none; }
-  .srcs label.on { border-color:var(--accent); background:#1b2735; }
-  .srcs input{ display:none; }
-  button { background:var(--accent); color:#071018; border:0; border-radius:8px; font:inherit;
-      font-weight:600; padding:10px 18px; cursor:pointer; }
+  .wrap { max-width:860px; margin:0 auto; padding:20px 16px 70px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:11px; padding:16px 18px; margin-bottom:16px; }
+  .step { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; margin-bottom:10px; }
+  input[type=text]{ background:var(--panel2); border:1px solid var(--line); color:var(--fg); border-radius:8px; padding:9px 11px; font:inherit; }
+  button { background:var(--accent); color:#071018; border:0; border-radius:8px; font:inherit; font-weight:600; padding:9px 16px; cursor:pointer; }
   button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); font-weight:500; }
   button:disabled{ opacity:.5; cursor:default; }
-  .log { background:#0b0d11; border:1px solid var(--line); border-radius:10px; padding:12px 14px;
-      font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap;
-      max-height:360px; overflow:auto; margin-top:14px; }
-  .log .ok{color:var(--ok)} .log .warn{color:var(--warn)} .log .bad{color:var(--bad)} .log .hd{color:var(--accent)}
-  .muted{color:var(--muted)} .pill{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
-  .glance{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
-  .chip{border:1px solid var(--line);border-radius:9px;padding:9px 12px;min-width:132px;background:var(--panel2)}
-  .chip .lab{font-weight:600;font-size:12.5px}
-  .chip .st{font-size:11px;color:var(--muted);margin-top:3px}
+  .muted{color:var(--muted)} .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  /* item checklist */
+  .item{ display:flex; align-items:center; gap:12px; padding:11px 12px; border:1px solid var(--line); border-radius:9px; background:var(--panel2); margin-bottom:9px; }
+  .item.mismatch{ border-color:var(--warn); }
+  .item.off{ opacity:.6; }
+  .item input[type=checkbox]{ width:18px; height:18px; flex:0 0 auto; cursor:pointer; }
+  .item .main{ flex:1; min-width:0; }
+  .item .title{ font-weight:600; }
+  .item .sub{ font-size:12px; color:var(--muted); }
+  .badge{ font-size:11px; border-radius:999px; padding:2px 9px; border:1px solid var(--line); white-space:nowrap; }
+  .badge.warn{ color:var(--warn); border-color:var(--warn); }
+  .ref{ font-size:12.5px; margin-bottom:10px; }
+  /* at a glance */
+  .glance{display:flex;gap:9px;flex-wrap:wrap}
+  .chip{border:1px solid var(--line);border-radius:9px;padding:8px 11px;min-width:118px;background:var(--panel2)}
+  .chip .lab{font-weight:600;font-size:12.5px} .chip .st{font-size:11px;color:var(--muted);margin-top:3px}
   .chip.verified{border-color:var(--ok)} .chip.verified .st{color:var(--ok)}
   .chip.present{border-color:#356049} .chip.copying{border-color:var(--accent)} .chip.copying .st{color:var(--accent)}
   .chip.error{border-color:var(--bad)} .chip.error .st{color:var(--bad)}
-  .bar{height:4px;background:#2a2f3a;border-radius:3px;margin-top:7px;overflow:hidden}
-  .bar>i{display:block;height:100%;background:var(--accent);transition:width .5s}
+  .bar{height:4px;background:#2a2f3a;border-radius:3px;margin-top:6px;overflow:hidden} .bar>i{display:block;height:100%;background:var(--accent);transition:width .5s}
+  .addrow{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+  .addrow .lbl{ width:100%; font-size:12px; color:var(--muted); margin-bottom:2px; }
+  .log { background:#0b0d11; border:1px solid var(--line); border-radius:10px; padding:12px 14px; font:12.5px/1.45 ui-monospace,Menlo,monospace; white-space:pre-wrap; max-height:320px; overflow:auto; }
+  .log .ok{color:var(--ok)} .log .warn{color:var(--warn)} .log .bad{color:var(--bad)} .log .hd{color:var(--accent)}
+  details summary{ cursor:pointer; color:var(--muted); }
 </style>
 </head>
 <body>
 <header>
   <h1>Gotham Gather</h1>
-  <span class="sub">end-of-shoot media ingest · <span id="gen" class="muted"></span></span>
+  <span class="muted" style="font-size:12px">end-of-shoot media ingest</span>
   <span style="flex:1"></span>
-  <button class="ghost" id="refresh">↻ Rescan devices</button>
+  <button class="ghost" id="rescan">↻ Rescan</button>
 </header>
 
 <div class="wrap">
-  <div class="devices" id="devices"></div>
 
-  <div class="card" id="activecard" style="margin-bottom:14px; border-color:#2e3a4a">
-    <label class="lbl">⚡ Active shoot &nbsp;<span class="muted">— cards you plug in auto-gather into this folder, no clicks</span></label>
-    <input type="text" id="activeshoot" placeholder="2026-09-MWU" autocomplete="off">
-    <button id="setactive">Set active</button>
-    <label style="margin-left:14px; cursor:pointer; user-select:none"><input type="checkbox" id="autoingest" checked style="vertical-align:-1px"> auto-ingest cards on insert</label>
-    <div id="activestatus" class="muted" style="margin-top:9px"></div>
-  </div>
-
-  <div class="card" id="glancecard" style="margin-bottom:14px; display:none">
-    <label class="lbl">📊 At a glance — <span id="glanceshoot" style="color:var(--fg)"></span></label>
-    <div id="glance" class="glance"></div>
-  </div>
-
-  <div class="card controls">
-    <label class="lbl">Manual gather — shoot folder &nbsp;<span class="muted">(rubric: YYYY-MM-CODE, e.g. 2026-09-MWU)</span></label>
-    <input type="text" id="shoot" placeholder="2026-09-MWU" autocomplete="off">
-    <div class="srcs" id="srcs"></div>
-    <button id="run">Gather selected</button>
-    <span id="hint" class="muted" style="margin-left:10px"></span>
-
-    <div style="margin-top:14px; border-top:1px solid var(--line); padding-top:12px">
-      <label class="lbl">🔗 Audio by Drive link <span class="muted">— when field audio is shared as a direct link instead of dropped in the folder</span></label>
-      <input type="text" id="audiolink" placeholder="https://drive.google.com/file/d/…/view   (or just the file ID)" autocomplete="off" style="width:min(440px,100%)">
-      <button id="pullaudio" class="ghost">Pull audio</button>
-      <span id="audiohint" class="muted" style="margin-left:8px"></span>
+  <!-- 1. Shoot -->
+  <div class="card">
+    <div class="step">1 · Shoot folder</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+      <input type="text" id="shoot" placeholder="e.g. 2026-10-CLEARCOM" autocomplete="off" style="flex:1; min-width:240px">
+      <span class="muted" id="recent" style="font-size:12px"></span>
     </div>
   </div>
 
+  <!-- 2. Available to add -->
+  <div class="card">
+    <div class="step">2 · What to gather <span class="muted" style="text-transform:none; letter-spacing:0">— check what belongs to THIS shoot</span></div>
+    <div class="ref" id="ref"></div>
+    <div id="items"><div class="muted">scanning…</div></div>
+    <div style="margin-top:12px; display:flex; gap:10px; align-items:center">
+      <button id="gather">Gather checked</button>
+      <span class="muted" id="ghint"></span>
+    </div>
+  </div>
+
+  <!-- 3. Add files -->
+  <div class="card">
+    <div class="step">3 · Add other files <span class="muted" style="text-transform:none; letter-spacing:0">— iPhone clips, a Drive link, or a file already on the server</span></div>
+    <details>
+      <summary>Upload from this computer (e.g. iPhone footage)</summary>
+      <div class="addrow">
+        <input type="file" id="upfile" multiple>
+        <input type="text" id="upsub" placeholder="subfolder (e.g. CAM-iPhone)" value="CAM-iPhone" style="width:190px">
+        <button class="ghost" id="upbtn">Upload</button>
+        <span class="muted" id="uphint"></span>
+      </div>
+    </details>
+    <details>
+      <summary>Add from a Google Drive link</summary>
+      <div class="addrow">
+        <input type="text" id="lnk" placeholder="https://drive.google.com/file/d/…/view (or file ID)" style="flex:1; min-width:260px">
+        <input type="text" id="lnksub" placeholder="subfolder" value="AUDIO" style="width:140px">
+        <button class="ghost" id="lnkbtn">Add link</button>
+        <span class="muted" id="lnkhint"></span>
+      </div>
+    </details>
+    <details>
+      <summary>Add from a path on the server / a mount</summary>
+      <div class="addrow">
+        <input type="text" id="pth" placeholder="/mnt/disks/… or /mnt/remotes/…" style="flex:1; min-width:260px">
+        <input type="text" id="pthsub" placeholder="subfolder" value="CAM-iPhone" style="width:140px">
+        <button class="ghost" id="pthbtn">Add path</button>
+        <span class="muted" id="pthhint"></span>
+      </div>
+    </details>
+  </div>
+
+  <!-- status -->
+  <div class="card" id="glancecard" style="display:none">
+    <div class="step">This shoot — <span id="glanceshoot" style="color:var(--fg)"></span></div>
+    <div id="glance" class="glance"></div>
+  </div>
+
   <div id="logwrap" style="display:none">
-    <div class="muted" style="margin-top:10px">Live output <span id="jobpill" class="pill"></span></div>
+    <div class="muted" style="margin:4px 0 8px">Live output <span id="jobpill" class="muted"></span></div>
     <div class="log" id="log"></div>
   </div>
 </div>
 
 <script>
-const SOURCES = [
-  ["cards","Camera cards"],["pix","PIX"],["atem","ATEM"],
-  ["zcam","Z CAM"],["audio","Audio"],["sweep","Sweep"]
-];
 const $ = s => document.querySelector(s);
-const sel = new Set();
+let REF = null;
 
-// ---- At-a-glance per-shoot ingest status ----
-const SRC_LABELS = {cards:"Cameras", pix:"PIX", atem:"ATEM", zcam:"Z CAM", audio:"Audio"};
-let activeShootVal = "";
-function glanceTarget(){ return activeShootVal || $("#shoot").value.trim(); }
-function stText(st){
-  if(st.state==="verified") return "✓ verified";
-  if(st.state==="present")  return "on disk";
-  if(st.state==="copying")  return "copying "+(st.pct||0)+"%";
-  if(st.state==="error")    return "✗ error";
-  return "— pending";
-}
-async function pollGlance(){
-  const shoot = glanceTarget(); const card = $("#glancecard");
-  if(!shoot){ card.style.display="none"; return; }
-  try{
-    const r = await fetch("/api/shoot-status?shoot="+encodeURIComponent(shoot));
-    if(!r.ok){ card.style.display="none"; return; }
-    const d = await r.json();
-    $("#glanceshoot").textContent = d.shoot;
-    const box = $("#glance"); box.innerHTML="";
-    for(const k of ["cards","pix","atem","zcam","audio"]){
-      const st = d.sources[k] || {state:"pending"};
-      const bar = st.state==="copying" ? `<div class="bar"><i style="width:${st.pct||0}%"></i></div>` : "";
-      const el = document.createElement("div"); el.className = "chip "+st.state;
-      el.innerHTML = `<div class="lab">${SRC_LABELS[k]}</div><div class="st">${stText(st)}</div>${bar}`;
-      box.appendChild(el);
-    }
-    card.style.display="block";
+async function loadShoots(){
+  try{ const r=await fetch("/api/status"); const d=await r.json();
+    $("#recent").textContent = d.shoots && d.shoots.length ? ("recent: "+d.shoots.slice(0,4).map(s=>s.name).join(", ")) : "";
   }catch(e){}
 }
 
-function srcChips(){
-  const box = $("#srcs"); box.innerHTML="";
-  for(const [k,label] of SOURCES){
-    const el = document.createElement("label");
-    el.className = sel.has(k)?"on":""; el.textContent = label;
-    el.onclick = ()=>{ sel.has(k)?sel.delete(k):sel.add(k); srcChips(); };
+// ---- 2. detected items checklist ----
+async function loadItems(){
+  $("#items").innerHTML='<div class="muted">scanning…</div>';
+  let d; try{ d=await (await fetch("/api/detect-items")).json(); }catch(e){ $("#items").innerHTML='<div class="bad">scan failed</div>'; return; }
+  REF = d.reference_project;
+  $("#ref").innerHTML = REF ? `Today's shoot looks like <b>${REF}</b> — anything that doesn't match is flagged below.` : '<span class="muted">No reference shoot detected (plug in cards / check the ATEM).</span>';
+  const box=$("#items"); box.innerHTML="";
+  // cards
+  for(const c of d.cards){
+    const mism=c.mismatch;
+    const el=document.createElement("label"); el.className="item"+(mism?" mismatch":"");
+    el.innerHTML=`<input type="checkbox" data-kind="card" data-mount="${c.mount}" ${mism?"":"checked"}>
+      <div class="main"><div class="title">Card ${c.label} · ${c.project||'?'} ${c.cam?('CAM '+c.cam):''}</div>
+        <div class="sub">${c.file} · ${c.human}</div></div>
+      ${mism?'<span class="badge warn">⚠ different shoot</span>':'<span class="badge ok">matches</span>'}`;
     box.appendChild(el);
   }
-}
-
-function dotClass(d){ if(!d.reachable) return "bad"; return d.ready?"ok":"warn"; }
-
-function devInner(d){
-  let items="";
-  if(d.items && d.items.length){
-    items = '<div class="items">'+d.items.slice(0,5).map(it=>{
-      const extra = it.size?(" · "+it.size):(it.label?(" · "+it.label):(it.mode?(" · "+it.mode):""));
-      const today = it.today?' <span style="color:var(--ok)">(today)</span>':'';
-      return "<div>• "+(it.name||it.dev||"?")+extra+today+"</div>";
-    }).join("")+"</div>";
-  }
-  return `<div class="top"><span class="name"><span class="dot ${dotClass(d)}"></span>${d.name}</span></div>
-    <div class="detail">${d.detail||""}</div>${items}`;
-}
-
-async function loadStatus(){
-  $("#devices").innerHTML = '<div class="muted">scanning…</div>';
-  const r = await fetch("/api/status"); const data = await r.json();
-  $("#gen").textContent = "scanned "+(data.generated||"");
-  const box = $("#devices"); box.innerHTML="";
-  for(const d of data.devices){
-    const el = document.createElement("div"); el.className="dev"; el.id="dev-"+d.key;
-    el.innerHTML = devInner(d);
+  // pix / atem / audio
+  const mk=(kind,title,sub,ok,checked)=>{
+    const el=document.createElement("label"); el.className="item"+(ok?"":" off");
+    el.innerHTML=`<input type="checkbox" data-kind="${kind}" ${checked&&ok?"checked":""} ${ok?"":"disabled"}>
+      <div class="main"><div class="title">${title}</div><div class="sub">${sub}</div></div>`;
     box.appendChild(el);
-  }
-  // suggest sources that are ready
-  if(sel.size===0){
-    for(const d of data.devices){ if(d.ready && d.key!=="zcam") sel.add(d.key); }
-    srcChips();
-  }
-  // prefill shoot from newest existing or blank
-  const hint = $("#hint");
-  hint.textContent = data.shoots && data.shoots.length ? ("recent: "+data.shoots.slice(0,3).map(s=>s.name).join(", ")) : "";
+  };
+  mk("pix","PIX recorder", d.pix.detail||"", d.pix.reachable, d.pix.ready);
+  mk("atem","ATEM switcher", d.atem.project?(d.atem.project+(d.atem.today?" (today)":" ("+(d.atem.date||'')+")")):"unreachable", d.atem.reachable, d.atem.today);
+  mk("audio","Field audio (Drive)", d.audio.detail||"", d.audio.reachable, false);
+  if(!d.cards.length) box.insertAdjacentHTML("afterbegin",'<div class="muted" style="margin-bottom:8px">No cards mounted. Plug a card into a rear reader, then Rescan.</div>');
 }
 
+async function gatherSelected(){
+  const shoot=$("#shoot").value.trim();
+  if(!shoot){ $("#ghint").textContent="enter a shoot folder name first"; return; }
+  const cards=[...document.querySelectorAll('input[data-kind="card"]:checked')].map(c=>c.dataset.mount);
+  const sel={ shoot, cards, pix:$('input[data-kind="pix"]')?.checked||false,
+              atem:$('input[data-kind="atem"]')?.checked||false, audio:$('input[data-kind="audio"]')?.checked||false };
+  const n=cards.length + (sel.pix?1:0)+(sel.atem?1:0)+(sel.audio?1:0);
+  if(!n){ $("#ghint").textContent="check at least one item"; return; }
+  if(!confirm(`Gather ${n} item(s) into "${shoot}"?\n\n`+
+      cards.map(m=>"• card "+m.split("/").pop()).concat(sel.pix?["• PIX"]:[],sel.atem?["• ATEM"]:[],sel.audio?["• Audio"]:[]).join("\n"))) return;
+  $("#gather").disabled=true; $("#log").innerHTML="";
+  const r=await fetch("/api/gather-selected",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(sel)});
+  if(!r.ok){ $("#ghint").textContent="✗ "+(await r.text()); $("#gather").disabled=false; return; }
+  const {job_id}=await r.json();
+  streamJob(job_id, "gather · "+shoot, ()=>{ $("#gather").disabled=false; });
+}
+
+// ---- 3. add files ----
+async function addUpload(){
+  const shoot=$("#shoot").value.trim(), sub=$("#upsub").value.trim(), files=$("#upfile").files;
+  if(!shoot){ $("#uphint").textContent="enter a shoot name"; return; }
+  if(!files.length){ $("#uphint").textContent="pick file(s)"; return; }
+  $("#upbtn").disabled=true;
+  for(let i=0;i<files.length;i++){
+    $("#uphint").textContent=`uploading ${i+1}/${files.length}: ${files[i].name}…`;
+    const fd=new FormData(); fd.append("shoot",shoot); fd.append("subfolder",sub); fd.append("file",files[i]);
+    const r=await fetch("/api/add-upload",{method:"POST",body:fd});
+    if(!r.ok){ $("#uphint").textContent="✗ "+(await r.text()); $("#upbtn").disabled=false; return; }
+  }
+  $("#uphint").innerHTML='<span class="ok">✓ uploaded into '+sub+'/</span>'; $("#upbtn").disabled=false; loadGlance();
+}
+async function addLink(){
+  const shoot=$("#shoot").value.trim();
+  if(!shoot){ $("#lnkhint").textContent="enter a shoot name"; return; }
+  $("#lnkbtn").disabled=true; $("#lnkhint").textContent="pulling…";
+  const r=await fetch("/api/add-link",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({shoot,link:$("#lnk").value.trim(),subfolder:$("#lnksub").value.trim()})});
+  $("#lnkbtn").disabled=false;
+  if(!r.ok){ $("#lnkhint").textContent="✗ "+(await r.text()); return; }
+  const {job_id,subfolder}=await r.json(); $("#lnkhint").textContent="pulling into "+subfolder+"/…"; $("#log").innerHTML="";
+  streamJob(job_id, "add link · "+shoot);
+}
+async function addPath(){
+  const shoot=$("#shoot").value.trim();
+  if(!shoot){ $("#pthhint").textContent="enter a shoot name"; return; }
+  $("#pthbtn").disabled=true; $("#pthhint").textContent="copying…";
+  const r=await fetch("/api/add-path",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({shoot,src:$("#pth").value.trim(),subfolder:$("#pthsub").value.trim()})});
+  $("#pthbtn").disabled=false;
+  if(!r.ok){ $("#pthhint").textContent="✗ "+(await r.text()); return; }
+  const {job_id,subfolder}=await r.json(); $("#pthhint").textContent="copying into "+subfolder+"/…"; $("#log").innerHTML="";
+  streamJob(job_id, "add path · "+shoot);
+}
+
+// ---- log streaming + at-a-glance ----
 function paintLine(line){
-  let cls="";
-  if(line.includes("✓")) cls="ok"; else if(line.includes("⚠")) cls="warn";
-  else if(line.includes("✗")) cls="bad"; else if(line.startsWith("[")) cls="hd";
-  const span=document.createElement("span"); span.className=cls; span.textContent=line+"\n";
-  const log=$("#log"); log.appendChild(span); log.scrollTop=log.scrollHeight;
+  let cls=""; if(line.includes("✓"))cls="ok"; else if(line.includes("⚠"))cls="warn"; else if(line.includes("✗"))cls="bad"; else if(line.startsWith("["))cls="hd";
+  const s=document.createElement("span"); s.className=cls; s.textContent=line+"\n"; const l=$("#log"); l.appendChild(s); l.scrollTop=l.scrollHeight;
 }
-
-function streamJob(job_id, label, onEnd){
+function streamJob(job_id,label,onEnd){
   $("#logwrap").style.display="block"; $("#jobpill").textContent=label;
   const es=new EventSource(`/api/jobs/${job_id}/events`);
   es.onmessage=e=>paintLine(e.data);
-  es.addEventListener("done",e=>{ paintLine("— finished ("+e.data+") —"); es.close();
-    loadStatus(); pollGlance(); if(onEnd) onEnd(); });
-  es.onerror=()=>{ es.close(); if(onEnd) onEnd(); };
+  es.addEventListener("done",e=>{ paintLine("— finished ("+e.data+") —"); es.close(); loadGlance(); loadItems(); if(onEnd)onEnd(); });
+  es.onerror=()=>{ es.close(); if(onEnd)onEnd(); };
 }
-async function run(){
-  const shoot=$("#shoot").value.trim();
-  if(!shoot){ $("#hint").textContent="enter a shoot name"; return; }
-  if(sel.size===0){ $("#hint").textContent="pick at least one source"; return; }
-  $("#run").disabled=true; $("#log").innerHTML="";
-  const r=await fetch("/api/gather",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({shoot,sources:[...sel]})});
-  if(!r.ok){ $("#logwrap").style.display="block"; paintLine("✗ "+(await r.text())); $("#run").disabled=false; return; }
-  const {job_id}=await r.json();
-  streamJob(job_id, "job "+job_id+" · "+shoot, ()=>{ $("#run").disabled=false; });
-}
-async function pullAudio(){
-  const shoot=$("#shoot").value.trim() || activeShootVal;
-  const link=$("#audiolink").value.trim();
-  if(!shoot){ $("#audiohint").textContent="set a shoot name (above, or the Active shoot)"; return; }
-  if(!link){ $("#audiohint").textContent="paste a Drive link or file ID"; return; }
-  $("#pullaudio").disabled=true; $("#audiohint").textContent="pulling…";
-  const r=await fetch("/api/audio-link",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({shoot,link})});
-  $("#pullaudio").disabled=false;
-  if(!r.ok){ $("#audiohint").textContent="✗ "+(await r.text()); return; }
-  const {job_id,file_id}=await r.json();
-  $("#audiohint").textContent="pulling "+file_id.slice(0,10)+"… → "+shoot+"/AUDIO";
-  $("#log").innerHTML="";
-  streamJob(job_id, "audio link · "+shoot);
-}
-
-// ---- Active shoot / zero-click auto-ingest ----
-let streamingAuto = null;    // auto job id currently being streamed into the log
-async function loadActive(){
-  try{
-    const r = await fetch("/api/active-shoot"); if(!r.ok) return; const s = await r.json();
-    activeShootVal = s.active_shoot || "";
-    if(document.activeElement !== $("#activeshoot")) $("#activeshoot").value = s.active_shoot || "";
-    $("#autoingest").checked = !!s.auto_ingest;
-    const st = $("#activestatus");
-    if(s.active_shoot && s.auto_ingest){
-      st.innerHTML = `🟢 Auto-ingest <b>ON</b> → plug a card and it gathers into <b>${s.active_shoot}</b>`;
-    } else if(s.active_shoot){
-      st.innerHTML = `active shoot: <b>${s.active_shoot}</b> · auto-ingest off`;
-    } else { st.textContent = "set an active shoot to enable plug-and-go card ingest"; }
-    // if the watcher kicked off an auto gather, surface it live
-    if(s.auto_job && !s.auto_job_done && streamingAuto !== s.auto_job){
-      streamingAuto = s.auto_job;
-      $("#logwrap").style.display="block"; $("#log").innerHTML="";
-      $("#jobpill").textContent = "auto-ingest · "+s.active_shoot;
-      paintLine("⚡ card detected — auto-gathering into "+s.active_shoot);
-      const es=new EventSource(`/api/jobs/${s.auto_job}/events`);
-      es.onmessage=e=>paintLine(e.data);
-      es.addEventListener("done",e=>{ paintLine("— auto-ingest finished ("+e.data+") —"); es.close(); streamingAuto=null; loadStatus(); });
-      es.onerror=()=>{ es.close(); streamingAuto=null; };
-    }
+const SRC={cards:"Cameras",pix:"PIX",atem:"ATEM",zcam:"Z CAM",audio:"Audio"};
+function stText(s){ return s.state==="verified"?"✓ verified":s.state==="present"?"on disk":s.state==="copying"?("copying "+(s.pct||0)+"%"):s.state==="error"?"✗ error":"— pending"; }
+async function loadGlance(){
+  const shoot=$("#shoot").value.trim(); const c=$("#glancecard");
+  if(!shoot){ c.style.display="none"; return; }
+  try{ const r=await fetch("/api/shoot-status?shoot="+encodeURIComponent(shoot)); if(!r.ok){c.style.display="none";return;}
+    const d=await r.json(); $("#glanceshoot").textContent=d.shoot; const box=$("#glance"); box.innerHTML="";
+    for(const k of ["cards","pix","atem","zcam","audio"]){ const s=d.sources[k]||{state:"pending"};
+      const bar=s.state==="copying"?`<div class="bar"><i style="width:${s.pct||0}%"></i></div>`:"";
+      const el=document.createElement("div"); el.className="chip "+s.state;
+      el.innerHTML=`<div class="lab">${SRC[k]}</div><div class="st">${stText(s)}</div>${bar}`; box.appendChild(el); }
+    c.style.display="block";
   }catch(e){}
 }
-async function setActive(){
-  const shoot=$("#activeshoot").value.trim();
-  await fetch("/api/active-shoot",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({shoot, auto_ingest:$("#autoingest").checked})});
-  loadActive();
-}
-$("#setactive").onclick=setActive;
-$("#autoingest").onchange=setActive;
 
-// Live card detection — poll the fast cards-only endpoint so a card lights up the
-// dashboard the moment it's inserted (and auto-mounted), no manual rescan needed.
-let lastCardsDetail = null;
-async function pollCards(){
-  try{
-    const r = await fetch("/api/cards"); if(!r.ok) return;
-    const d = await r.json();
-    const el = document.getElementById("dev-"+d.key);
-    if(el) el.innerHTML = devInner(d);
-    if(d.detail !== lastCardsDetail && d.ready){ sel.add("cards"); srcChips(); }
-    lastCardsDetail = d.detail;
-  }catch(e){}
-}
-setInterval(()=>{ pollCards(); loadActive(); pollGlance(); }, 5000);
-
-$("#refresh").onclick=loadStatus;
-$("#run").onclick=run;
-$("#pullaudio").onclick=pullAudio;
-srcChips(); loadStatus(); loadActive(); pollGlance();
+$("#rescan").onclick=()=>{ loadItems(); loadShoots(); };
+$("#gather").onclick=gatherSelected;
+$("#upbtn").onclick=addUpload; $("#lnkbtn").onclick=addLink; $("#pthbtn").onclick=addPath;
+$("#shoot").addEventListener("change", loadGlance);
+setInterval(loadGlance, 4000);
+loadShoots(); loadItems();
 </script>
 </body>
 </html>

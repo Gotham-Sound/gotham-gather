@@ -99,29 +99,40 @@ pull_file(){ # <src> <destdir> <expected-bytes>
 # unambiguous here). Sort by 'CAM N' parsed from the filename.
 # Ingest already-mounted card dirs (container / host-mount+bind model): no mounting,
 # just read each subdir of CARDS_DIR that holds .braw. Sort by 'CAM N' same as below.
+# Ingest the .braw masters from ONE already-mounted card dir. Returns 0 if it had braw.
+_ingest_card_dir(){
+  local d="$1" label; label=$(basename "$d")
+  [ -d "$d" ] || return 1
+  mapfile -t braws < <(timeout 15 find "$d" -maxdepth 3 -iname '*.braw' 2>/dev/null)
+  [ ${#braws[@]} -eq 0 ] && return 1
+  local f base cam dest exp
+  for f in "${braws[@]}"; do
+    base=$(basename "$f")
+    cam=$(grep -oiE 'CAM[ _]*[0-9]+' <<<"$base" | grep -oE '[0-9]+' | head -1)
+    dest="$SHOOT/CAM-${cam:-$label}"
+    exp=$(stat -c %s "$f")
+    if [ -f "$dest/$base" ] && [ "$(stat -c %s "$dest/$base" 2>/dev/null)" = "$exp" ]; then
+      ok "already have $base — skipping"; continue
+    fi
+    say "  card '$label': $base ($(human "$exp")) -> $(basename "$dest")/"
+    pull_file "$f" "$dest" "$exp"
+  done
+  return 0
+}
+
+# Ingest ONE specific card by mount path (the explicit "pick this card" flow).
+do_card_path(){
+  say "CARDS — $(basename "$1")"
+  _ingest_card_dir "$1" || warn "no .braw found on $1"
+}
+
 do_cards_dir(){
   say "CARDS — scanning pre-mounted card dirs under $CARDS_DIR"
   local found=0 d
+  # timeout-guard the scan: a failing/stale USB mount (dead device, I/O errors) under
+  # the same dir must not hang or stall card detection — it just gets skipped.
   for d in "$CARDS_DIR"/*/; do
-    [ -d "$d" ] || continue
-    # timeout-guard the scan: a failing/stale USB mount (dead device, I/O errors) under
-    # the same dir must not hang or stall card detection — it just gets skipped.
-    mapfile -t braws < <(timeout 15 find "$d" -maxdepth 3 -iname '*.braw' 2>/dev/null)
-    [ ${#braws[@]} -eq 0 ] && continue
-    found=1
-    local label; label=$(basename "$d")
-    for f in "${braws[@]}"; do
-      local base cam dest exp
-      base=$(basename "$f")
-      cam=$(grep -oiE 'CAM[ _]*[0-9]+' <<<"$base" | grep -oE '[0-9]+' | head -1)
-      dest="$SHOOT/CAM-${cam:-$label}"
-      exp=$(stat -c %s "$f")
-      if [ -f "$dest/$base" ] && [ "$(stat -c %s "$dest/$base" 2>/dev/null)" = "$exp" ]; then
-        ok "already have $base — skipping"; continue
-      fi
-      say "  card '$label': $base ($(human "$exp")) -> $(basename "$dest")/"
-      pull_file "$f" "$dest" "$exp"
-    done
+    _ingest_card_dir "$d" && found=1
   done
   [ "$found" = 0 ] && warn "no cards with .braw found under $CARDS_DIR — plug a card into a REAR USB port (Unraid mounts it under /mnt/disks)"
 }
@@ -381,6 +392,7 @@ say "GATHER → $SHOOT   sources: ${SOURCES[*]}"
 for s in "${SOURCES[@]}"; do case "$s" in
   cards) do_cards;; zcam) do_zcam;; pix) do_pix;; atem) do_atem;; audio) do_audio;; sweep) do_sweep;;
   pixeft) do_pix_mode eft;; pixrec) do_pix_mode record;;
+  card:*) do_card_path "${s#card:}";;
   *) warn "unknown source '$s'";; esac; done
 
 say "MANIFEST — $SHOOT"

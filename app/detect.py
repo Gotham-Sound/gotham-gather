@@ -111,32 +111,53 @@ def detect_atem() -> Device:
                   [{"name": f} for f in folders[-6:]])
 
 CARDS_DIR = os.environ.get("CARDS_DIR", "")
+_BRAW_RE = re.compile(r"^(.*?)\s+CAM[ _]*(\d+)", re.I)  # "<Project> CAM N 01.braw"
+
+def _parse_braw(fname):
+    m = _BRAW_RE.search(fname)
+    return (m.group(1).strip(), m.group(2)) if m else ("", "")
+
+def card_items() -> list[dict]:
+    """Enriched list of mounted camera cards — each card's real project name + CAM# + size,
+    so the UI can show what's on the card and flag ones from a different shoot."""
+    import glob
+    items = []
+    if not (CARDS_DIR and os.path.isdir(CARDS_DIR)):
+        return items
+    try:
+        names = sorted(os.listdir(CARDS_DIR))
+    except OSError:
+        return items
+    for name in names:
+        d = os.path.join(CARDS_DIR, name)
+        try:
+            if not os.path.isdir(d):
+                continue
+            braws = glob.glob(os.path.join(d, "*.braw")) or glob.glob(os.path.join(d, "*", "*.braw"))
+        except OSError:
+            continue   # a failing/stale USB mount (I/O error) — skip, never break detection
+        if not braws:
+            continue
+        braws.sort()
+        try:
+            size = sum(os.path.getsize(b) for b in braws)
+        except OSError:
+            size = 0
+        proj, cam = _parse_braw(os.path.basename(braws[0]))
+        items.append({"id": "card:" + d, "label": name, "mount": d,
+                      "file": os.path.basename(braws[0]), "files": len(braws),
+                      "project": proj, "cam": cam, "bytes": size, "human": _human(size)})
+    return items
 
 def detect_cards() -> Device:
     # Container path: read already-mounted card dirs under CARDS_DIR (Unraid mounts the
     # card, /mnt/disks is bind-mounted in). A non-privileged container can't see host
     # block devices via lsblk, so this is the reliable path when CARDS_DIR is set.
-    import glob
     if CARDS_DIR and os.path.isdir(CARDS_DIR):
-        cards = []
-        try:
-            names = sorted(os.listdir(CARDS_DIR))
-        except OSError:
-            names = []
-        for name in names:
-            d = os.path.join(CARDS_DIR, name)
-            try:
-                if not os.path.isdir(d):
-                    continue
-                has = bool(glob.glob(os.path.join(d, "*.braw")) or
-                           glob.glob(os.path.join(d, "*", "*.braw")))
-            except OSError:
-                continue   # a failing/stale USB mount (I/O error) — skip, never break detection
-            if has:
-                cards.append({"label": name, "dev": name})
+        items = card_items()
         return Device("cards", "Camera cards (USB)", True,
-                      f"{len(cards)} card(s) with footage" if cards else "no cards mounted",
-                      bool(cards), cards)
+                      f"{len(items)} card(s) with footage" if items else "no cards mounted",
+                      bool(items), items)
     # Host path: USB-transport exfat partitions (parent disk is USB).
     rc, usb = _run(["bash", "-c", "lsblk -rno NAME,TRAN | awk '$2==\"usb\"{print $1}'"])
     usb_disks = set(usb.split())
@@ -189,6 +210,47 @@ def detect_audio() -> Device:
     if ro_save:
         detail += " · ⚠ rclone config read-only (mount RW so tokens refresh)"
     return Device("audio", "Field audio (Drive)", True, detail, bool(wavs), wavs)
+
+def atem_today() -> dict:
+    """Newest ATEM project folder + whether it's dated today — the authoritative
+    'this is today's shoot' signal, used to flag cards from a different shoot."""
+    rc, out = _run(["smbclient", f"//{ATEM_HOST}/{ATEM_SHARE}", "-U", "guest%", "-c", "ls"], timeout=15)
+    best = None; best_t = None
+    for line in out.splitlines():
+        m = re.match(r"\s+(.+?)\s+D\s+\d+\s+(\w{3}\s+\w{3}\s+\d+\s+[\d:]+\s+\d{4})", line)
+        if not m or m.group(1).strip() in (".", ".."):
+            continue
+        try:
+            t = datetime.datetime.strptime(m.group(2).strip(), "%a %b %d %H:%M:%S %Y")
+        except ValueError:
+            continue
+        if best_t is None or t > best_t:
+            best_t, best = t, m.group(1).strip()
+    return {"project": best,
+            "date": best_t.date().isoformat() if best_t else None,
+            "today": bool(best_t and best_t.date() == datetime.date.today())}
+
+
+def detect_items() -> dict:
+    """Unified, enriched view for the explicit see-and-confirm UI: every card by its real
+    identity (flagged if it's from a different shoot), plus PIX / ATEM / audio summaries."""
+    from collections import Counter
+    cards = card_items()
+    atem = atem_today()
+    ref = atem["project"] if atem.get("today") else None
+    if not ref:
+        projs = [c["project"] for c in cards if c["project"]]
+        ref = Counter(projs).most_common(1)[0][0] if projs else None
+    for c in cards:
+        c["mismatch"] = bool(ref and c["project"] and c["project"] != ref)
+    pix = detect_pix(); audio = detect_audio()
+    return {"reference_project": ref,
+            "cards": cards,
+            "pix": {"reachable": pix.reachable, "detail": pix.detail, "ready": pix.ready},
+            "atem": {"reachable": bool(atem["project"]), **atem},
+            "audio": {"reachable": audio.reachable, "detail": audio.detail,
+                      "items": audio.items or []}}
+
 
 def detect_all() -> dict:
     devices = [detect_cards(), detect_pix(), detect_atem(), detect_zcam(), detect_audio()]
